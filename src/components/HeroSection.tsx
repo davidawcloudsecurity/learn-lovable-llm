@@ -12,7 +12,7 @@ const HeroSection = () => {
 
         <div className="flex flex-col sm:flex-row gap-4 mt-8 w-full max-w-2xl px-4">
           <a
-            href="#"
+            href="/chat"
             className="flex-1 group bg-card rounded-xl border border-border p-6 ds-card-hover"
           >
             <h3 className="text-lg font-semibold text-primary mb-2">Start Now</h3>
