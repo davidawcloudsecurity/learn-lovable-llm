@@ -7,7 +7,7 @@ const AnnouncementBanner = () => {
       >
         <span>🎉</span>
         <span>
-          Launching DeepSeek-V3.2 — Reasoning-first models built for agents. Now available on web, app & API.{" "}
+          Launching LearnLLM-V3.2 — Reasoning-first models built for agents. Now available on web, app & API.{" "}
           <span className="text-primary font-medium">Click for details.</span>
         </span>
       </a>

@@ -1,13 +1,13 @@
-interface DeepSeekLogoProps {
+interface LearnLLMLogoProps {
   className?: string;
   variant?: "small" | "large";
 }
 
-export const DeepSeekLogo = ({ className = "", variant = "small" }: DeepSeekLogoProps) => {
+export const LearnLLMLogo = ({ className = "", variant = "small" }: LearnLLMLogoProps) => {
   if (variant === "large") {
     return (
       <h1 className={`ds-wordmark font-bold tracking-tight select-none ${className}`}>
-        deepseek
+        learnllm
       </h1>
     );
   }
@@ -24,7 +24,7 @@ export const DeepSeekLogo = ({ className = "", variant = "small" }: DeepSeekLogo
         />
         <circle cx="12" cy="18" r="0.75" fill="currentColor" />
       </svg>
-      <span className="ds-wordmark font-semibold text-lg tracking-tight">deepseek</span>
+      <span className="ds-wordmark font-semibold text-lg tracking-tight">learnllm</span>
     </div>
   );
 };

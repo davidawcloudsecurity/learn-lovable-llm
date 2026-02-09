@@ -1,5 +1,5 @@
 const responses = [
-  "That's a great question! DeepSeek is designed to provide thoughtful, helpful responses across a wide range of topics. How can I help you further?",
+  "That's a great question! LearnLLM is designed to provide thoughtful, helpful responses across a wide range of topics. How can I help you further?",
   "I'd be happy to help with that. Let me break it down:\n\n1. **First**, consider the core problem you're trying to solve\n2. **Second**, evaluate the available options\n3. **Third**, choose the approach that best fits your needs\n\nWould you like me to elaborate on any of these points?",
   "Here's what I think about that:\n\n> The best way to predict the future is to create it.\n\nLet me know if you'd like to explore this topic further!",
   "That's an interesting perspective. Based on my understanding:\n\n- The key factor here is **context**\n- Different situations call for different approaches\n- There's rarely a one-size-fits-all solution\n\nWhat specific aspect would you like to dive deeper into?",

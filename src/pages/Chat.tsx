@@ -3,7 +3,7 @@ import { Send, Plus, MessageSquare } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { DeepSeekLogo } from "@/components/DeepSeekLogo";
+import { LearnLLMLogo } from "@/components/LearnLLMLogo";
 import { streamMockResponse } from "@/lib/mock-ai";
 import ReactMarkdown from "react-markdown";
 
@@ -89,7 +89,7 @@ const Chat = () => {
         </div>
         <div className="p-4 border-t border-border">
           <a href="/" className="flex items-center gap-2">
-            <DeepSeekLogo className="h-5 w-auto" />
+            <LearnLLMLogo className="h-5 w-auto" />
           </a>
         </div>
       </aside>
@@ -98,7 +98,7 @@ const Chat = () => {
       <main className="flex-1 flex flex-col min-w-0">
         {/* Header (mobile) */}
         <header className="md:hidden flex items-center justify-between p-3 border-b border-border">
-          <DeepSeekLogo className="h-5 w-auto" />
+          <LearnLLMLogo className="h-5 w-auto" />
           <Button variant="ghost" size="icon" onClick={handleNewChat}>
             <Plus className="h-5 w-5" />
           </Button>
@@ -108,7 +108,7 @@ const Chat = () => {
         <div ref={scrollRef} className="flex-1 overflow-y-auto">
           {isEmpty ? (
             <div className="h-full flex flex-col items-center justify-center gap-4 px-4">
-              <DeepSeekLogo variant="large" className="text-5xl md:text-6xl" />
+              <LearnLLMLogo variant="large" className="text-5xl md:text-6xl" />
               <p className="text-lg text-muted-foreground">
                 How can I help you today?
               </p>
@@ -176,7 +176,7 @@ const Chat = () => {
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder="Message DeepSeek..."
+              placeholder="Message LearnLLM..."
               className="min-h-[44px] max-h-[200px] resize-none rounded-xl bg-muted border-0 focus-visible:ring-1"
               rows={1}
             />
@@ -190,7 +190,7 @@ const Chat = () => {
             </Button>
           </div>
           <p className="text-xs text-muted-foreground text-center mt-2">
-            DeepSeek can make mistakes. Consider checking important info.
+            LearnLLM can make mistakes. Consider checking important info.
           </p>
         </div>
       </main>
