@@ -7,7 +7,7 @@ const HeroSection = () => {
         <LearnLLMLogo variant="large" className="text-7xl md:text-8xl lg:text-[6.5rem]" />
 
         <p className="text-2xl md:text-3xl font-light text-muted-foreground tracking-wide">
-          Into the unknown
+          learn-lovable-llm
         </p>
 
         <div className="flex flex-col sm:flex-row gap-4 mt-8 w-full max-w-2xl px-4">
