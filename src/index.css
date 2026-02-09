@@ -6,74 +6,74 @@
 
 @layer base {
   :root {
-    --background: 210 50% 98%;
-    --foreground: 222 20% 20%;
+    --background: 0 0% 100%;
+    --foreground: 0 0% 5%;
 
     --card: 0 0% 100%;
-    --card-foreground: 222 20% 20%;
+    --card-foreground: 0 0% 5%;
 
     --popover: 0 0% 100%;
-    --popover-foreground: 222 20% 20%;
+    --popover-foreground: 0 0% 5%;
 
-    --primary: 222 90% 55%;
-    --primary-foreground: 0 0% 100%;
+    --primary: 50 100% 50%;
+    --primary-foreground: 0 0% 5%;
 
-    --secondary: 210 40% 96%;
-    --secondary-foreground: 222 20% 20%;
+    --secondary: 0 0% 96%;
+    --secondary-foreground: 0 0% 5%;
 
-    --muted: 210 30% 94%;
-    --muted-foreground: 215 16% 50%;
+    --muted: 0 0% 94%;
+    --muted-foreground: 0 0% 40%;
 
-    --accent: 222 90% 55%;
-    --accent-foreground: 0 0% 100%;
+    --accent: 50 100% 50%;
+    --accent-foreground: 0 0% 5%;
 
     --destructive: 0 84% 60%;
     --destructive-foreground: 0 0% 100%;
 
-    --border: 214 30% 91%;
-    --input: 214 30% 91%;
-    --ring: 222 90% 55%;
+    --border: 0 0% 90%;
+    --input: 0 0% 90%;
+    --ring: 50 100% 50%;
 
     --radius: 0.75rem;
 
     --sidebar-background: 0 0% 98%;
-    --sidebar-foreground: 240 5.3% 26.1%;
-    --sidebar-primary: 240 5.9% 10%;
+    --sidebar-foreground: 0 0% 15%;
+    --sidebar-primary: 0 0% 5%;
     --sidebar-primary-foreground: 0 0% 98%;
-    --sidebar-accent: 240 4.8% 95.9%;
-    --sidebar-accent-foreground: 240 5.9% 10%;
-    --sidebar-border: 220 13% 91%;
-    --sidebar-ring: 217.2 91.2% 59.8%;
+    --sidebar-accent: 0 0% 95%;
+    --sidebar-accent-foreground: 0 0% 10%;
+    --sidebar-border: 0 0% 90%;
+    --sidebar-ring: 50 100% 50%;
 
     /* Custom LearnLLM tokens */
-    --ds-blue: 222 90% 55%;
-    --ds-blue-light: 216 80% 65%;
-    --ds-gradient-start: 210 60% 95%;
-    --ds-gradient-end: 220 70% 90%;
-    --ds-text-secondary: 215 16% 55%;
-    --ds-banner-bg: 210 40% 97%;
+    --ds-blue: 50 100% 50%;
+    --ds-blue-light: 48 100% 60%;
+    --ds-gradient-start: 0 0% 100%;
+    --ds-gradient-end: 0 0% 96%;
+    --ds-text-secondary: 0 0% 45%;
+    --ds-banner-bg: 0 0% 97%;
   }
 
   .dark {
-    --background: 222 30% 8%;
-    --foreground: 210 40% 98%;
-    --card: 222 30% 12%;
-    --card-foreground: 210 40% 98%;
-    --popover: 222 30% 12%;
-    --popover-foreground: 210 40% 98%;
-    --primary: 222 90% 60%;
-    --primary-foreground: 0 0% 100%;
-    --secondary: 217 32% 17%;
-    --secondary-foreground: 210 40% 98%;
-    --muted: 217 32% 17%;
-    --muted-foreground: 215 20% 65%;
-    --accent: 217 32% 17%;
-    --accent-foreground: 210 40% 98%;
+    --background: 0 0% 5%;
+    --foreground: 0 0% 98%;
+    --card: 0 0% 8%;
+    --card-foreground: 0 0% 98%;
+    --popover: 0 0% 8%;
+    --popover-foreground: 0 0% 98%;
+    --primary: 50 100% 50%;
+    --primary-foreground: 0 0% 5%;
+    --secondary: 0 0% 15%;
+    --secondary-foreground: 0 0% 98%;
+    --muted: 0 0% 15%;
+    --muted-foreground: 0 0% 60%;
+    --accent: 0 0% 15%;
+    --accent-foreground: 0 0% 98%;
     --destructive: 0 62% 30%;
-    --destructive-foreground: 210 40% 98%;
-    --border: 217 32% 17%;
-    --input: 217 32% 17%;
-    --ring: 212 26% 83%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 0 0% 18%;
+    --input: 0 0% 18%;
+    --ring: 50 100% 50%;
   }
 }
 
@@ -107,15 +107,15 @@
     position: absolute;
     inset: 0;
     background: 
-      radial-gradient(ellipse 80% 50% at 50% 20%, hsl(222 90% 55% / 0.04) 0%, transparent 70%),
-      radial-gradient(ellipse 60% 40% at 30% 60%, hsl(216 80% 65% / 0.03) 0%, transparent 60%),
-      radial-gradient(ellipse 60% 40% at 70% 40%, hsl(200 70% 70% / 0.03) 0%, transparent 60%);
+      radial-gradient(ellipse 80% 50% at 50% 20%, hsl(50 100% 50% / 0.06) 0%, transparent 70%),
+      radial-gradient(ellipse 60% 40% at 30% 60%, hsl(48 100% 60% / 0.04) 0%, transparent 60%),
+      radial-gradient(ellipse 60% 40% at 70% 40%, hsl(45 90% 55% / 0.04) 0%, transparent 60%);
     pointer-events: none;
     z-index: 0;
   }
 
   .ds-wordmark {
-    background: linear-gradient(135deg, hsl(222 90% 55%), hsl(216 80% 65%));
+    background: linear-gradient(135deg, hsl(0 0% 10%), hsl(0 0% 30%));
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
     background-clip: text;
@@ -127,6 +127,6 @@
 
   .ds-card-hover:hover {
     transform: translateY(-2px);
-    box-shadow: 0 8px 30px hsl(222 90% 55% / 0.1);
+    box-shadow: 0 8px 30px hsl(50 100% 50% / 0.15);
   }
 }
