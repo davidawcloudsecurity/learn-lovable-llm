@@ -3,14 +3,7 @@ import { Mail, Github } from "lucide-react";
 
 const footerLinks = {
   Research: [
-    "LearnLLM R1",
-    "LearnLLM V3",
-    "LearnLLM Coder V2",
-    "LearnLLM VL",
-    "LearnLLM V2",
-    "LearnLLM Coder",
-    "LearnLLM Math",
-    "LearnLLM LLM",
+    "Learn LLM",
   ],
   Product: [
     "LearnLLM App",
