@@ -15,7 +15,7 @@ const HeroSection = () => {
             href="/chat"
             className="flex-1 group bg-card rounded-xl border border-border p-6 ds-card-hover"
           >
-            <h3 className="text-lg font-semibold text-primary mb-2">Start Now</h3>
+            <h3 className="text-lg font-semibold mb-2"><span className="text-foreground bg-yellow-300">Start Now</span></h3>
             <p className="text-sm text-muted-foreground leading-relaxed">
               Free access to LearnLLM-V3.2.
               <br />
@@ -27,7 +27,7 @@ const HeroSection = () => {
             href="#"
             className="flex-1 group bg-card rounded-xl border border-border p-6 ds-card-hover"
           >
-            <h3 className="text-lg font-semibold text-primary mb-2">Access API</h3>
+            <h3 className="text-lg font-semibold mb-2"><span className="text-foreground bg-yellow-300">Access API</span></h3>
             <p className="text-sm text-muted-foreground leading-relaxed">
               Build with the latest LearnLLM models.
               <br />
