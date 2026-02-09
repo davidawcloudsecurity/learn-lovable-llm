@@ -116,7 +116,7 @@
 
   .ds-wordmark {
     color: hsl(0 0% 5%);
-    background: linear-gradient(180deg, transparent 55%, hsl(50 100% 50% / 0.4) 55%);
+    background: hsl(50 100% 50% / 0.4);
     -webkit-text-fill-color: initial;
     background-clip: initial;
     -webkit-background-clip: initial;
