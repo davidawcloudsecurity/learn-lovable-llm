@@ -1,21 +1,21 @@
-import { DeepSeekLogo } from "./DeepSeekLogo";
+import { LearnLLMLogo } from "./LearnLLMLogo";
 import { Mail, Github } from "lucide-react";
 
 const footerLinks = {
   Research: [
-    "DeepSeek R1",
-    "DeepSeek V3",
-    "DeepSeek Coder V2",
-    "DeepSeek VL",
-    "DeepSeek V2",
-    "DeepSeek Coder",
-    "DeepSeek Math",
-    "DeepSeek LLM",
+    "LearnLLM R1",
+    "LearnLLM V3",
+    "LearnLLM Coder V2",
+    "LearnLLM VL",
+    "LearnLLM V2",
+    "LearnLLM Coder",
+    "LearnLLM Math",
+    "LearnLLM LLM",
   ],
   Product: [
-    "DeepSeek App",
-    "DeepSeek Chat",
-    "DeepSeek Platform",
+    "LearnLLM App",
+    "LearnLLM Chat",
+    "LearnLLM Platform",
     "API Pricing",
     "Service Status",
   ],
@@ -51,7 +51,7 @@ const Footer = () => {
         <div className="grid grid-cols-1 md:grid-cols-6 gap-10">
           {/* Logo & socials */}
           <div className="md:col-span-2 flex flex-col gap-6">
-            <DeepSeekLogo className="h-6" />
+            <LearnLLMLogo className="h-6" />
             <div className="flex items-center gap-4 text-muted-foreground">
               {["mail", "github", "x"].map((social) => (
                 <a
@@ -64,7 +64,7 @@ const Footer = () => {
               ))}
             </div>
             <p className="text-xs text-muted-foreground">
-              © 2026 DeepSeek. All rights reserved.
+              © 2026 LearnLLM. All rights reserved.
             </p>
           </div>
 

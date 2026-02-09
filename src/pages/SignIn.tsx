@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { DeepSeekLogo } from "@/components/DeepSeekLogo";
+import { LearnLLMLogo } from "@/components/LearnLLMLogo";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
@@ -21,7 +21,7 @@ const SignIn = () => {
     <div className="min-h-screen flex items-center justify-center bg-background px-4">
       <div className="w-full max-w-sm space-y-8">
         <div className="flex flex-col items-center gap-2">
-          <DeepSeekLogo variant="large" className="text-4xl" />
+          <LearnLLMLogo variant="large" className="text-4xl" />
           <p className="text-muted-foreground text-sm">
             {isSignUp ? "Create your account" : "Welcome back"}
           </p>
