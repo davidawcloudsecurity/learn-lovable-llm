@@ -231,6 +231,13 @@ resource "aws_instance" "frontend" {
   vpc_security_group_ids = [aws_security_group.frontend_sg[0].id]
   iam_instance_profile   = aws_iam_instance_profile.ec2_profile.name
 
+  root_block_device {
+    volume_size           = 30
+    volume_type           = "gp3"
+    delete_on_termination = true
+    encrypted             = true
+  }
+
   user_data = <<-EOF
               #!/bin/bash
               apt update
