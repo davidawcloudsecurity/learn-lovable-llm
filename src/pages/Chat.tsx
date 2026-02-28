@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { LearnLLMLogo } from "@/components/LearnLLMLogo";
-import { streamMockResponse } from "@/lib/mock-ai";
+import { streamChatResponse } from "@/lib/chat-api";
 import ReactMarkdown from "react-markdown";
 
 type Message = { role: "user" | "assistant"; content: string };
@@ -13,6 +13,7 @@ const Chat = () => {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -27,9 +28,11 @@ const Chat = () => {
     if (!trimmed || isLoading) return;
 
     const userMsg: Message = { role: "user", content: trimmed };
-    setMessages((prev) => [...prev, userMsg]);
+    const updatedMessages = [...messages, userMsg];
+    setMessages(updatedMessages);
     setInput("");
     setIsLoading(true);
+    setError(null);
 
     let assistantSoFar = "";
     const upsert = (chunk: string) => {
@@ -45,7 +48,13 @@ const Chat = () => {
       });
     };
 
-    await streamMockResponse(upsert, () => setIsLoading(false));
+    const onDone = () => setIsLoading(false);
+    const onError = (err: string) => {
+      setError(err);
+      setIsLoading(false);
+    };
+
+    await streamChatResponse(updatedMessages, upsert, onDone, onError);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -58,6 +67,7 @@ const Chat = () => {
   const handleNewChat = () => {
     setMessages([]);
     setInput("");
+    setError(null);
   };
 
   const isEmpty = messages.length === 0;
@@ -170,6 +180,11 @@ const Chat = () => {
 
         {/* Input area */}
         <div className="border-t border-border p-4">
+          {error && (
+            <div className="max-w-3xl mx-auto mb-2 p-3 bg-destructive/10 border border-destructive/20 rounded-lg text-sm text-destructive">
+              Error: {error}
+            </div>
+          )}
           <div className="max-w-3xl mx-auto flex gap-2 items-end">
             <Textarea
               ref={textareaRef}
