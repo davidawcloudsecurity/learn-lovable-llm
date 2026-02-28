@@ -1,10 +1,38 @@
 import express from 'express';
 import cors from 'cors';
+import fs from 'fs';
+import path from 'path';
 
 const app = express();
 const PORT = process.env.PORT || 8000;
 const OLLAMA_URL = process.env.OLLAMA_URL || 'http://localhost:11434';
-const MODEL = process.env.OLLAMA_MODEL || 'llama3.2';
+const MODEL = process.env.OLLAMA_MODEL || 'smollm:1.7b';
+
+// Create logs directory
+const logsDir = path.join(process.cwd(), 'logs');
+if (!fs.existsSync(logsDir)) {
+  fs.mkdirSync(logsDir, { recursive: true });
+}
+
+// Logger function
+function log(message, data = null) {
+  const timestamp = new Date().toISOString();
+  const logEntry = {
+    timestamp,
+    message,
+    ...(data && { data })
+  };
+  
+  // Console output
+  console.log(`[${timestamp}] ${message}`);
+  if (data) {
+    console.log(JSON.stringify(data, null, 2));
+  }
+  
+  // File output
+  const logFile = path.join(logsDir, `chat-${new Date().toISOString().split('T')[0]}.log`);
+  fs.appendFileSync(logFile, JSON.stringify(logEntry) + '\n');
+}
 
 app.use(cors());
 app.use(express.json());
@@ -14,8 +42,32 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', service: 'LearnLLM API (Ollama)' });
 });
 
+// Logs endpoint - view recent logs
+app.get('/api/logs', (req, res) => {
+  try {
+    const today = new Date().toISOString().split('T')[0];
+    const logFile = path.join(logsDir, `chat-${today}.log`);
+    
+    if (!fs.existsSync(logFile)) {
+      return res.json({ logs: [], message: 'No logs for today' });
+    }
+    
+    const logs = fs.readFileSync(logFile, 'utf-8')
+      .split('\n')
+      .filter(line => line.trim())
+      .map(line => JSON.parse(line))
+      .slice(-50); // Last 50 entries
+    
+    res.json({ logs, count: logs.length });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // Chat endpoint with streaming
 app.post('/api/chat', async (req, res) => {
+  const requestId = Date.now();
+  
   try {
     const { messages } = req.body;
 
@@ -24,10 +76,10 @@ app.post('/api/chat', async (req, res) => {
     }
 
     // Log incoming request
-    console.log('\n=== INCOMING REQUEST ===');
-    console.log('Timestamp:', new Date().toISOString());
-    console.log('Messages:', JSON.stringify(messages, null, 2));
-    console.log('Message count:', messages.length);
+    log(`[${requestId}] Incoming chat request`, {
+      messageCount: messages.length,
+      messages: messages
+    });
 
     // Set headers for streaming
     res.setHeader('Content-Type', 'text/event-stream');
@@ -40,9 +92,11 @@ app.post('/api/chat', async (req, res) => {
       stream: true,
     };
 
-    console.log('\n=== OLLAMA REQUEST ===');
-    console.log('URL:', `${OLLAMA_URL}/api/chat`);
-    console.log('Body:', JSON.stringify(requestBody, null, 2));
+    log(`[${requestId}] Sending to Ollama`, {
+      url: `${OLLAMA_URL}/api/chat`,
+      model: MODEL,
+      messageCount: messages.length
+    });
 
     // Call Ollama API
     const response = await fetch(`${OLLAMA_URL}/api/chat`, {
@@ -57,9 +111,9 @@ app.post('/api/chat', async (req, res) => {
       throw new Error(`Ollama API error: ${response.status}`);
     }
 
-    console.log('\n=== OLLAMA RESPONSE STREAM ===');
     let fullResponse = '';
     let chunkCount = 0;
+    const chunks = [];
 
     // Stream the response
     const reader = response.body.getReader();
@@ -76,9 +130,7 @@ app.post('/api/chat', async (req, res) => {
         try {
           const parsed = JSON.parse(line);
           chunkCount++;
-          
-          // Log full chunk details
-          console.log(`\nChunk #${chunkCount}:`, JSON.stringify(parsed, null, 2));
+          chunks.push(parsed);
           
           if (parsed.message?.content) {
             fullResponse += parsed.message.content;
@@ -86,28 +138,31 @@ app.post('/api/chat', async (req, res) => {
           }
           
           if (parsed.done) {
-            console.log('\n=== RESPONSE COMPLETE ===');
-            console.log('Full response:', fullResponse);
-            console.log('Total chunks:', chunkCount);
-            console.log('Response length:', fullResponse.length);
-            
-            // Log metadata if available
-            if (parsed.total_duration) {
-              console.log('Duration:', parsed.total_duration / 1e9, 'seconds');
-            }
-            if (parsed.eval_count) {
-              console.log('Tokens generated:', parsed.eval_count);
-            }
-            if (parsed.prompt_eval_count) {
-              console.log('Prompt tokens:', parsed.prompt_eval_count);
-            }
+            // Log complete response with metadata
+            log(`[${requestId}] Response complete`, {
+              fullResponse,
+              chunkCount,
+              responseLength: fullResponse.length,
+              duration: parsed.total_duration ? (parsed.total_duration / 1e9).toFixed(2) + 's' : 'N/A',
+              tokensGenerated: parsed.eval_count || 'N/A',
+              promptTokens: parsed.prompt_eval_count || 'N/A',
+              model: parsed.model || MODEL,
+              metadata: {
+                total_duration: parsed.total_duration,
+                load_duration: parsed.load_duration,
+                prompt_eval_count: parsed.prompt_eval_count,
+                prompt_eval_duration: parsed.prompt_eval_duration,
+                eval_count: parsed.eval_count,
+                eval_duration: parsed.eval_duration
+              }
+            });
             
             res.write('data: [DONE]\n\n');
             res.end();
             return;
           }
         } catch (e) {
-          console.error('Failed to parse chunk:', line, e);
+          log(`[${requestId}] Failed to parse chunk`, { error: e.message, line });
         }
       }
     }
@@ -116,9 +171,10 @@ app.post('/api/chat', async (req, res) => {
     res.end();
 
   } catch (error) {
-    console.error('\n=== ERROR ===');
-    console.error('Error details:', error);
-    console.error('Stack:', error.stack);
+    log(`[${requestId}] Error occurred`, {
+      error: error.message,
+      stack: error.stack
+    });
     
     if (!res.headersSent) {
       res.status(500).json({ 
@@ -133,7 +189,10 @@ app.post('/api/chat', async (req, res) => {
 });
 
 app.listen(PORT, () => {
-  console.log(`LearnLLM API server running on port ${PORT}`);
-  console.log(`Ollama URL: ${OLLAMA_URL}`);
-  console.log(`Model: ${MODEL}`);
+  log('Server started', {
+    port: PORT,
+    ollamaUrl: OLLAMA_URL,
+    model: MODEL,
+    logsDirectory: logsDir
+  });
 });
