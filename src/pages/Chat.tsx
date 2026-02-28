@@ -14,6 +14,7 @@ const Chat = () => {
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [responseTime, setResponseTime] = useState<number | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -33,9 +34,17 @@ const Chat = () => {
     setInput("");
     setIsLoading(true);
     setError(null);
+    setResponseTime(null);
+
+    const startTime = performance.now();
+    let firstTokenTime: number | null = null;
 
     let assistantSoFar = "";
     const upsert = (chunk: string) => {
+      if (firstTokenTime === null) {
+        firstTokenTime = performance.now();
+      }
+      
       assistantSoFar += chunk;
       setMessages((prev) => {
         const last = prev[prev.length - 1];
@@ -48,7 +57,17 @@ const Chat = () => {
       });
     };
 
-    const onDone = () => setIsLoading(false);
+    const onDone = () => {
+      const endTime = performance.now();
+      const totalTime = ((endTime - startTime) / 1000).toFixed(2);
+      const timeToFirstToken = firstTokenTime ? ((firstTokenTime - startTime) / 1000).toFixed(2) : null;
+      
+      setResponseTime(parseFloat(totalTime));
+      setIsLoading(false);
+      
+      console.log(`Response completed in ${totalTime}s (first token: ${timeToFirstToken}s)`);
+    };
+    
     const onError = (err: string) => {
       setError(err);
       setIsLoading(false);
@@ -68,6 +87,7 @@ const Chat = () => {
     setMessages([]);
     setInput("");
     setError(null);
+    setResponseTime(null);
   };
 
   const isEmpty = messages.length === 0;
@@ -183,6 +203,16 @@ const Chat = () => {
           {error && (
             <div className="max-w-3xl mx-auto mb-2 p-3 bg-destructive/10 border border-destructive/20 rounded-lg text-sm text-destructive">
               Error: {error}
+            </div>
+          )}
+          {responseTime !== null && !isLoading && (
+            <div className="max-w-3xl mx-auto mb-2 px-3 py-1 text-xs text-muted-foreground text-center">
+              ⚡ Response time: {responseTime}s
+            </div>
+          )}
+          {isLoading && (
+            <div className="max-w-3xl mx-auto mb-2 px-3 py-1 text-xs text-muted-foreground text-center animate-pulse">
+              🤖 Generating response...
             </div>
           )}
           <div className="max-w-3xl mx-auto flex gap-2 items-end">
