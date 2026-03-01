@@ -6,7 +6,7 @@ interface LearnLLMLogoProps {
 export const LearnLLMLogo = ({ className = "", variant = "small" }: LearnLLMLogoProps) => {
   if (variant === "large") {
     return (
-      <h1 className={`ds-wordmark font-bold tracking-tight select-none ${className}`}>
+      <h1 className={`ds-wordmark font-bold tracking-tight select-none font-display ${className}`}>
         learnllm
       </h1>
     );
@@ -24,7 +24,7 @@ export const LearnLLMLogo = ({ className = "", variant = "small" }: LearnLLMLogo
         />
         <circle cx="12" cy="18" r="0.75" fill="currentColor" />
       </svg>
-      <span className="ds-wordmark font-semibold text-lg tracking-tight">learnllm</span>
+      <span className="ds-wordmark font-semibold text-lg tracking-tight font-display">learnllm</span>
     </div>
   );
 };
