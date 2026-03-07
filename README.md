@@ -1,4 +1,4 @@
-# Welcome to your Lovable project
+# Vision: How to communicate llm through slack
 
 ## Project info
 

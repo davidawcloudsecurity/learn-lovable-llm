@@ -256,7 +256,7 @@ resource "aws_instance" "frontend" {
                 root /opt/app/dist;
                 index index.html;
                 location /api/ {
-                  proxy_pass http://${aws_instance.backend[0].private_ip}:8000;
+                  proxy_pass http://localhost:8000;
                 }
                 location / {
                   try_files $uri /index.html;

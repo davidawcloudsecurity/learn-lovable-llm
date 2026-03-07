@@ -2,9 +2,7 @@ import { LearnLLMLogo } from "./LearnLLMLogo";
 import { Mail, Github } from "lucide-react";
 
 const footerLinks = {
-  Research: [
-    "Learn LLM",
-  ],
+  Research: ["Learn LLM"],
   Product: [
     "LearnLLM App",
     "LearnLLM Chat",
@@ -12,11 +10,7 @@ const footerLinks = {
     "API Pricing",
     "Service Status",
   ],
-  "Legal & Safety": [
-    "Privacy Policy",
-    "Terms of Use",
-    "Report Vulnerabilities",
-  ],
+  "Legal & Safety": ["Privacy Policy", "Terms of Use", "Report Vulnerabilities"],
   "Join Us": ["Job Description"],
 };
 
@@ -39,10 +33,9 @@ const SocialIcon = ({ type }: { type: string }) => {
 
 const Footer = () => {
   return (
-    <footer className="border-t border-border bg-card">
-      <div className="container max-w-6xl mx-auto px-6 py-12">
+    <footer className="border-t border-border bg-card/50 backdrop-blur-sm">
+      <div className="container max-w-6xl mx-auto px-6 py-14">
         <div className="grid grid-cols-1 md:grid-cols-6 gap-10">
-          {/* Logo & socials */}
           <div className="md:col-span-2 flex flex-col gap-6">
             <LearnLLMLogo className="h-6" />
             <div className="flex items-center gap-4 text-muted-foreground">
@@ -50,7 +43,7 @@ const Footer = () => {
                 <a
                   key={social}
                   href="#"
-                  className="hover:text-foreground transition-colors"
+                  className="hover:text-primary transition-colors duration-200"
                 >
                   <SocialIcon type={social} />
                 </a>
@@ -61,16 +54,17 @@ const Footer = () => {
             </p>
           </div>
 
-          {/* Link columns */}
           {Object.entries(footerLinks).map(([title, links]) => (
             <div key={title}>
-              <h4 className="font-semibold text-sm text-foreground mb-4">{title}</h4>
+              <h4 className="font-display font-semibold text-sm text-foreground mb-4">
+                {title}
+              </h4>
               <ul className="space-y-2.5">
                 {links.map((link) => (
                   <li key={link}>
                     <a
                       href="#"
-                      className="text-sm text-muted-foreground hover:text-foreground transition-colors"
+                      className="text-sm text-muted-foreground hover:text-foreground transition-colors duration-200"
                     >
                       {link}
                     </a>

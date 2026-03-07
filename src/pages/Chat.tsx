@@ -1,11 +1,12 @@
 import { useState, useRef, useEffect } from "react";
-import { Send, Plus, MessageSquare } from "lucide-react";
+import { Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Textarea } from "@/components/ui/textarea";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { LearnLLMLogo } from "@/components/LearnLLMLogo";
 import { streamChatResponse } from "@/lib/chat-api";
-import ReactMarkdown from "react-markdown";
+import ChatSidebar from "@/components/chat/ChatSidebar";
+import ChatEmptyState from "@/components/chat/ChatEmptyState";
+import ChatMessage from "@/components/chat/ChatMessage";
+import ChatInput from "@/components/chat/ChatInput";
 
 type Message = { role: "user" | "assistant"; content: string };
 
@@ -49,11 +50,9 @@ const Chat = () => {
     }, 1000);
 
     let assistantSoFar = "";
+
     const upsert = (chunk: string) => {
-      if (firstTokenTime === null) {
-        firstTokenTime = performance.now();
-      }
-      
+      if (firstTokenTime === null) firstTokenTime = performance.now();
       assistantSoFar += chunk;
       setMessages((prev) => {
         const last = prev[prev.length - 1];
@@ -83,7 +82,7 @@ const Chat = () => {
       
       console.log(`Response completed in ${totalTime}s (first token: ${timeToFirstToken}s)`);
     };
-    
+
     const onError = (err: string) => {
       // Stop the timer on error
       if (timerRef.current) {
@@ -99,13 +98,6 @@ const Chat = () => {
     await streamChatResponse(updatedMessages, upsert, onDone, onError);
   };
 
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      handleSend();
-    }
-  };
-
   const handleNewChat = () => {
     setMessages([]);
     setInput("");
@@ -117,42 +109,16 @@ const Chat = () => {
 
   return (
     <div className="flex h-screen bg-background">
-      {/* Sidebar */}
-      <aside className="hidden md:flex w-64 flex-col border-r border-border bg-card">
-        <div className="p-4 border-b border-border">
-          <Button
-            variant="outline"
-            className="w-full justify-start gap-2"
-            onClick={handleNewChat}
-          >
-            <Plus className="h-4 w-4" />
-            New Chat
-          </Button>
-        </div>
-        <div className="flex-1 p-3">
-          <p className="text-xs text-muted-foreground px-2 py-1">Today</p>
-          {messages.length > 0 && (
-            <div className="flex items-center gap-2 px-2 py-2 rounded-lg bg-accent/50 text-sm text-foreground">
-              <MessageSquare className="h-4 w-4 shrink-0 text-muted-foreground" />
-              <span className="truncate">
-                {messages[0].content.slice(0, 30)}...
-              </span>
-            </div>
-          )}
-        </div>
-        <div className="p-4 border-t border-border">
-          <a href="/" className="flex items-center gap-2">
-            <LearnLLMLogo className="h-5 w-auto" />
-          </a>
-        </div>
-      </aside>
+      <ChatSidebar
+        firstMessage={messages[0]?.content}
+        onNewChat={handleNewChat}
+      />
 
-      {/* Main chat area */}
       <main className="flex-1 flex flex-col min-w-0">
-        {/* Header (mobile) */}
-        <header className="md:hidden flex items-center justify-between p-3 border-b border-border">
+        {/* Mobile header */}
+        <header className="md:hidden flex items-center justify-between p-3 border-b border-border/50 bg-background/80 backdrop-blur-sm">
           <LearnLLMLogo className="h-5 w-auto" />
-          <Button variant="ghost" size="icon" onClick={handleNewChat}>
+          <Button variant="ghost" size="icon" onClick={handleNewChat} className="rounded-xl">
             <Plus className="h-5 w-5" />
           </Button>
         </header>
@@ -160,53 +126,16 @@ const Chat = () => {
         {/* Messages */}
         <div ref={scrollRef} className="flex-1 overflow-y-auto">
           {isEmpty ? (
-            <div className="h-full flex flex-col items-center justify-center gap-4 px-4">
-              <LearnLLMLogo variant="large" className="text-5xl md:text-6xl" />
-              <p className="text-lg text-muted-foreground">
-                How can I help you today?
-              </p>
-            </div>
+            <ChatEmptyState />
           ) : (
-            <div className="max-w-3xl mx-auto py-6 px-4 space-y-6">
+            <div className="max-w-3xl mx-auto py-6 px-4 space-y-5">
               {messages.map((msg, i) => (
-                <div
-                  key={i}
-                  className={`flex gap-3 ${
-                    msg.role === "user" ? "justify-end" : "justify-start"
-                  }`}
-                >
-                  {msg.role === "assistant" && (
-                    <div className="shrink-0 w-8 h-8 rounded-full bg-primary flex items-center justify-center">
-                      <span className="text-primary-foreground text-xs font-bold">
-                        DS
-                      </span>
-                    </div>
-                  )}
-                  <div
-                    className={`max-w-[80%] rounded-2xl px-4 py-3 ${
-                      msg.role === "user"
-                        ? "bg-primary text-primary-foreground"
-                        : "bg-muted text-foreground"
-                    }`}
-                  >
-                    {msg.role === "assistant" ? (
-                      <div className="prose prose-sm dark:prose-invert max-w-none">
-                        <ReactMarkdown>{msg.content}</ReactMarkdown>
-                      </div>
-                    ) : (
-                      <p className="text-sm whitespace-pre-wrap">
-                        {msg.content}
-                      </p>
-                    )}
-                  </div>
-                </div>
+                <ChatMessage key={i} message={msg} index={i} />
               ))}
               {isLoading && messages[messages.length - 1]?.role !== "assistant" && (
                 <div className="flex gap-3">
-                  <div className="shrink-0 w-8 h-8 rounded-full bg-primary flex items-center justify-center">
-                    <span className="text-primary-foreground text-xs font-bold">
-                      DS
-                    </span>
+                  <div className="shrink-0 w-8 h-8 rounded-full bg-primary flex items-center justify-center shadow-sm">
+                    <span className="text-primary-foreground text-xs font-bold font-display">LL</span>
                   </div>
                   <div>
                     <div className="bg-muted rounded-2xl px-4 py-3">
@@ -226,46 +155,14 @@ const Chat = () => {
           )}
         </div>
 
-        {/* Input area */}
-        <div className="border-t border-border p-4">
-          {error && (
-            <div className="max-w-3xl mx-auto mb-2 p-3 bg-destructive/10 border border-destructive/20 rounded-lg text-sm text-destructive">
-              Error: {error}
-            </div>
-          )}
-          {responseTime !== null && !isLoading && (
-            <div className="max-w-3xl mx-auto mb-2 px-3 py-1 text-xs text-muted-foreground text-center">
-              ⚡ Response time: {responseTime}s
-            </div>
-          )}
-          {isLoading && (
-            <div className="max-w-3xl mx-auto mb-2 px-3 py-1 text-xs text-muted-foreground text-center animate-pulse">
-              🤖 Generating response...
-            </div>
-          )}
-          <div className="max-w-3xl mx-auto flex gap-2 items-end">
-            <Textarea
-              ref={textareaRef}
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={handleKeyDown}
-              placeholder="Message LearnLLM..."
-              className="min-h-[44px] max-h-[200px] resize-none rounded-xl bg-muted border-0 focus-visible:ring-1"
-              rows={1}
-            />
-            <Button
-              size="icon"
-              onClick={handleSend}
-              disabled={!input.trim() || isLoading}
-              className="shrink-0 rounded-xl h-11 w-11"
-            >
-              <Send className="h-4 w-4" />
-            </Button>
-          </div>
-          <p className="text-xs text-muted-foreground text-center mt-2">
-            LearnLLM can make mistakes. Consider checking important info.
-          </p>
-        </div>
+        <ChatInput
+          input={input}
+          isLoading={isLoading}
+          error={error}
+          responseTime={responseTime}
+          onInputChange={setInput}
+          onSend={handleSend}
+        />
       </main>
     </div>
   );
