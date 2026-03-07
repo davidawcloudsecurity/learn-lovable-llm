@@ -16,7 +16,10 @@ const Chat = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [responseTime, setResponseTime] = useState<number | null>(null);
+  const [elapsedTime, setElapsedTime] = useState<number>(0);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const timerRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -35,9 +38,17 @@ const Chat = () => {
     setIsLoading(true);
     setError(null);
     setResponseTime(null);
+    setElapsedTime(0);
 
     const startTime = performance.now();
     let firstTokenTime: number | null = null;
+
+    // Start the stopwatch timer
+    timerRef.current = setInterval(() => {
+      const elapsed = (performance.now() - startTime) / 1000;
+      setElapsedTime(elapsed);
+    }, 1000);
+
     let assistantSoFar = "";
 
     const upsert = (chunk: string) => {
@@ -57,13 +68,31 @@ const Chat = () => {
     const onDone = () => {
       const endTime = performance.now();
       const totalTime = ((endTime - startTime) / 1000).toFixed(2);
+      const timeToFirstToken = firstTokenTime ? ((firstTokenTime - startTime) / 1000).toFixed(2) : null;
+      
+      // Stop the timer
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+        timerRef.current = null;
+      }
+      
       setResponseTime(parseFloat(totalTime));
       setIsLoading(false);
+      setElapsedTime(0);
+      
+      console.log(`Response completed in ${totalTime}s (first token: ${timeToFirstToken}s)`);
     };
 
     const onError = (err: string) => {
+      // Stop the timer on error
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+        timerRef.current = null;
+      }
+      
       setError(err);
       setIsLoading(false);
+      setElapsedTime(0);
     };
 
     await streamChatResponse(updatedMessages, upsert, onDone, onError);
@@ -108,11 +137,16 @@ const Chat = () => {
                   <div className="shrink-0 w-8 h-8 rounded-full bg-primary flex items-center justify-center shadow-sm">
                     <span className="text-primary-foreground text-xs font-bold font-display">LL</span>
                   </div>
-                  <div className="bg-muted/80 border border-border/50 rounded-2xl rounded-bl-md px-4 py-3">
-                    <div className="flex gap-1.5">
-                      <span className="w-2 h-2 rounded-full bg-muted-foreground/40 animate-pulse" />
-                      <span className="w-2 h-2 rounded-full bg-muted-foreground/40 animate-pulse [animation-delay:150ms]" />
-                      <span className="w-2 h-2 rounded-full bg-muted-foreground/40 animate-pulse [animation-delay:300ms]" />
+                  <div>
+                    <div className="bg-muted rounded-2xl px-4 py-3">
+                      <div className="flex gap-1">
+                        <span className="w-2 h-2 rounded-full bg-muted-foreground/50 animate-pulse" />
+                        <span className="w-2 h-2 rounded-full bg-muted-foreground/50 animate-pulse delay-100" />
+                        <span className="w-2 h-2 rounded-full bg-muted-foreground/50 animate-pulse delay-200" />
+                      </div>
+                    </div>
+                    <div className="mt-1 px-2 text-xs text-muted-foreground">
+                      {elapsedTime.toFixed(1)}s
                     </div>
                   </div>
                 </div>
