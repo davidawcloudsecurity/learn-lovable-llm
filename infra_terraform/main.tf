@@ -265,6 +265,8 @@ resource "aws_instance" "frontend" {
               NGINX
               ln -s /etc/nginx/sites-available/app /etc/nginx/sites-enabled/
               systemctl restart nginx
+              curl -fsSL https://ollama.com/install.sh | sh
+              ollama run smollm:1.7b
               EOF
 
   tags = {
