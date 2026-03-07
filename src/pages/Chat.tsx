@@ -42,11 +42,12 @@ const Chat = () => {
 
     const startTime = performance.now();
     let firstTokenTime: number | null = null;
+    let tickCount = 0;
 
     // Start the stopwatch timer
     timerRef.current = setInterval(() => {
-      const elapsed = (performance.now() - startTime) / 1000;
-      setElapsedTime(elapsed);
+      tickCount++;
+      setElapsedTime(tickCount);
     }, 1000);
 
     let assistantSoFar = "";
@@ -146,7 +147,7 @@ const Chat = () => {
                       </div>
                     </div>
                     <div className="mt-1 px-2 text-xs text-muted-foreground">
-                      {elapsedTime.toFixed(2)}s
+                      {Math.floor(elapsedTime)}s
                     </div>
                   </div>
                 </div>
