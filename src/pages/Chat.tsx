@@ -146,7 +146,7 @@ const Chat = () => {
                       </div>
                     </div>
                     <div className="mt-1 px-2 text-xs text-muted-foreground">
-                      {elapsedTime.toFixed(1)}s
+                      {elapsedTime.toFixed(2)}s
                     </div>
                   </div>
                 </div>
