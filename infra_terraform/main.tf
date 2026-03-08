@@ -257,6 +257,14 @@ resource "aws_instance" "frontend" {
                 index index.html;
                 location /api/ {
                   proxy_pass http://localhost:8000;
+                  # Increase timeouts for slow LLM responses
+                  proxy_read_timeout 300s;      # 5 minutes
+                  proxy_connect_timeout 75s;
+                  proxy_send_timeout 300s;
+                  
+                  # Important for streaming
+                  proxy_buffering off;
+                  proxy_cache off;
                 }
                 location / {
                   try_files $uri /index.html;
@@ -265,6 +273,8 @@ resource "aws_instance" "frontend" {
               NGINX
               ln -s /etc/nginx/sites-available/app /etc/nginx/sites-enabled/
               systemctl restart nginx
+              curl -fsSL https://ollama.com/install.sh | sh
+              ollama run smollm:1.7b
               EOF
 
   tags = {
