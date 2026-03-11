@@ -184,6 +184,99 @@ resource "aws_iam_role_policy_attachment" "ssm_policy" {
   policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
 }
 
+# IAM Policy for Bedrock access
+resource "aws_iam_policy" "bedrock_policy" {
+  name        = "${var.project_tag}-bedrock-policy"
+  description = "Policy for Bedrock access including models, knowledge bases, and guardrails"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "bedrock:InvokeModel",
+          "bedrock:InvokeModelWithResponseStream",
+          "bedrock:GetFoundationModel",
+          "bedrock:ListFoundationModels"
+        ]
+        Resource = "*"
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "bedrock:Retrieve",
+          "bedrock:RetrieveAndGenerate"
+        ]
+        Resource = "*"
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "bedrock:ApplyGuardrail"
+        ]
+        Resource = "*"
+      }
+    ]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "bedrock_policy_attachment" {
+  role       = aws_iam_role.ec2_role.name
+  policy_arn = aws_iam_policy.bedrock_policy.arn
+}
+
+# DynamoDB Table for Chat Sessions
+resource "aws_dynamodb_table" "chat_sessions" {
+  name         = "${var.project_tag}-ChatSessions"
+  billing_mode = "PAY_PER_REQUEST"
+  hash_key     = "session_id"
+  range_key    = "message_id"
+
+  attribute {
+    name = "session_id"
+    type = "S"
+  }
+
+  attribute {
+    name = "message_id"
+    type = "S"
+  }
+
+  tags = {
+    Name = "${var.project_tag}-chat-sessions"
+  }
+}
+
+# IAM Policy for DynamoDB access
+resource "aws_iam_policy" "dynamodb_policy" {
+  name        = "${var.project_tag}-dynamodb-policy"
+  description = "Policy for DynamoDB chat sessions table access"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "dynamodb:PutItem",
+          "dynamodb:GetItem",
+          "dynamodb:Query",
+          "dynamodb:Scan",
+          "dynamodb:UpdateItem",
+          "dynamodb:DeleteItem"
+        ]
+        Resource = aws_dynamodb_table.chat_sessions.arn
+      }
+    ]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "dynamodb_policy_attachment" {
+  role       = aws_iam_role.ec2_role.name
+  policy_arn = aws_iam_policy.dynamodb_policy.arn
+}
+
 # Get latest Ubuntu AMI
 data "aws_ami" "ubuntu" {
   most_recent = true
@@ -206,15 +299,47 @@ resource "aws_instance" "backend" {
 
   user_data = <<-EOF
               #!/bin/bash
+              set -e
+              
+              # Update system
               apt update
-              apt install -y git curl
+              apt install -y git curl python3 python3-pip python3-venv
+              
+              # Install Node.js
               curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
               apt install -y nodejs
+              
+              # Clone repository
               cd /opt
               git clone https://github.com/davidawcloudsecurity/learn-lovable-llm.git app
-              cd app
-              npm install
+              cd app/server/bedrock
+              
+              # Create Python virtual environment
+              python3 -m venv venv
+              source venv/bin/activate
+              
+              # Install Python dependencies
+              pip install --upgrade pip
+              pip install -r requirements.txt
+              
+              # Create .env file with AWS configuration
+              cat > .env <<'ENVFILE'
+              PORT=8000
+              AWS_REGION=us-east-1
+              BEDROCK_MODEL_ID=anthropic.claude-3-5-haiku-20241022-v1:0
+              CHAT_SESSIONS_TABLE_NAME=${var.project_tag}-ChatSessions
+              KNOWLEDGE_BASE_ID=
+              GUARDRAIL_ID=
+              GUARDRAIL_VERSION=
+              ENVFILE
+              
+              # Install PM2 globally
               npm install -g pm2
+              
+              # Start the Python FastAPI server with PM2
+              pm2 start index.py --name bedrock-api --interpreter venv/bin/python3
+              pm2 save
+              pm2 startup systemd -u root --hp /root
               EOF
 
   tags = {
