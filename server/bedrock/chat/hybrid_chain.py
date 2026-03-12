@@ -6,6 +6,7 @@ conversation chain or a RAG-enabled chain based on message intent.
 """
 
 import logging
+import os
 from typing import Any, Dict, List, Optional
 
 from langchain_aws import ChatBedrock
@@ -49,9 +50,13 @@ class HybridConversationChain:
         self.model_id = model_id
         self.window_size = window_size
         
+        # Get AWS region from environment variable
+        aws_region = os.getenv("AWS_REGION", "us-east-1")
+        
         # Create the LLM
         self.llm = ChatBedrock(
             model=model_id,
+            region_name=aws_region,
             model_kwargs={
                 "temperature": 0.0,
                 "top_p": 0.9,
