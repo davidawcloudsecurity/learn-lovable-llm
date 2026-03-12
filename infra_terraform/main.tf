@@ -375,13 +375,23 @@ resource "aws_instance" "frontend" {
               npm install
               npm run build
               rm /etc/nginx/sites-enabled/default
-              cat > /etc/nginx/sites-available/app <<'NGINX'
+              
+              # Get backend private IP
+              BACKEND_IP="${aws_instance.backend[0].private_ip}"
+              
+              cat > /etc/nginx/sites-available/app <<NGINX
               server {
                 listen 80;
                 root /opt/app/dist;
                 index index.html;
                 location /api/ {
-                  proxy_pass http://localhost:8000;
+                  proxy_pass http://$BACKEND_IP:8000;
+                  proxy_http_version 1.1;
+                  proxy_set_header Upgrade \$http_upgrade;
+                  proxy_set_header Connection 'upgrade';
+                  proxy_set_header Host \$host;
+                  proxy_cache_bypass \$http_upgrade;
+                  
                   # Increase timeouts for slow LLM responses
                   proxy_read_timeout 300s;      # 5 minutes
                   proxy_connect_timeout 75s;
@@ -392,7 +402,7 @@ resource "aws_instance" "frontend" {
                   proxy_cache off;
                 }
                 location / {
-                  try_files $uri /index.html;
+                  try_files \$uri /index.html;
                 }
               }
               NGINX
