@@ -47,6 +47,7 @@ class ChatConversationChain:
         self.retriever = retriever
         self.model_id = model_id
         self.window_size = window_size
+        aws_region = os.getenv("AWS_REGION", "us-east-1")        
         self.llm = ChatBedrockConverse(
             model=model_id,
             model_kwargs={
