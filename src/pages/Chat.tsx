@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from "react";
 import { Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { LearnLLMLogo } from "@/components/LearnLLMLogo";
-import { streamChatResponse } from "@/lib/chat-api";
+import { streamChatResponse, resetSession } from "@/lib/chat-api";
 import ChatSidebar from "@/components/chat/ChatSidebar";
 import ChatEmptyState from "@/components/chat/ChatEmptyState";
 import ChatMessage from "@/components/chat/ChatMessage";
@@ -103,6 +103,7 @@ const Chat = () => {
     setInput("");
     setError(null);
     setResponseTime(null);
+    resetSession();
   };
 
   const isEmpty = messages.length === 0;
