@@ -50,6 +50,7 @@ class ChatConversationChain:
         aws_region = os.getenv("AWS_REGION", "us-east-1")        
         self.llm = ChatBedrockConverse(
             model=model_id,
+            region_name=aws_region,
             model_kwargs={
                 "temperature": 0.0,
                 "top_p": 0.9,
