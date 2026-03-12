@@ -69,34 +69,43 @@ class MessageRepository:
             ChatServiceUnavailableError: If the DynamoDB service is unavailable
             ChatError: For other DynamoDB errors
         """
-        # TODO: Implement message saving to DynamoDB
-        #
-        # STUDENT IMPLEMENTATION REQUIRED:
-        # This method needs to save a chat message to the DynamoDB table.
-        # Follow the existing service patterns for error handling and logging.
-        #
-        # Implementation steps:
-        # 1. Create the item dictionary with all required fields:
-        #    - session_id, message_id, message_type, message (required)
-        #    - timestamp: use int(time.time())
-        #    - intent, sources: include only if provided (not None)
-        #
-        # 2. Use self.table.put_item(Item=item) to save to DynamoDB
-        #
-        # 3. Handle ClientError exceptions following this pattern:
-        #    - ServiceUnavailable, InternalServerError, ThrottlingException 
-        #      -> raise ChatServiceUnavailableError("DynamoDB")
-        #    - ProvisionedThroughputExceededException 
-        #      -> raise ChatServiceUnavailableError("DynamoDB throughput exceeded")
-        #    - Other ClientError -> raise ChatError(f"DynamoDB error: {str(e)}", 500)
-        #
-        # 4. Add logging: logger.info(f"Saved message {message_id} for session {session_id}")
-        #
-        # 5. Return the complete item dictionary
-        #
-        # Hint: Look at the existing service's DynamoDB patterns for reference
+        # Create the item dictionary with required fields
+        item = {
+            "session_id": session_id,
+            "message_id": message_id,
+            "message_type": message_type,
+            "message": message,
+            "timestamp": int(time.time()),
+        }
         
-        raise NotImplementedError("Students need to implement DynamoDB message saving")
+        # Add optional fields if provided
+        if intent is not None:
+            item["intent"] = intent
+        if sources is not None:
+            item["sources"] = sources
+        
+        try:
+            # Save to DynamoDB
+            self.table.put_item(Item=item)
+            logger.info(f"Saved message {message_id} for session {session_id}")
+            return item
+            
+        except ClientError as e:
+            error_code = e.response.get("Error", {}).get("Code", "")
+            
+            # Handle service unavailability
+            if error_code in ["ServiceUnavailable", "InternalServerError", "ThrottlingException"]:
+                logger.error(f"DynamoDB service unavailable: {error_code}")
+                raise ChatServiceUnavailableError("DynamoDB")
+            
+            # Handle throughput exceeded
+            if error_code == "ProvisionedThroughputExceededException":
+                logger.error("DynamoDB throughput exceeded")
+                raise ChatServiceUnavailableError("DynamoDB throughput exceeded")
+            
+            # Handle other errors
+            logger.error(f"DynamoDB error saving message: {str(e)}")
+            raise ChatError(f"DynamoDB error: {str(e)}", 500)
 
     def get_messages(self, session_id: str) -> List[Dict[str, Any]]:
         """Get all messages for a session.
@@ -111,31 +120,32 @@ class MessageRepository:
             ChatServiceUnavailableError: If the DynamoDB service is unavailable
             ChatError: For other DynamoDB errors
         """
-        # TODO: Implement message retrieval from DynamoDB
-        #
-        # STUDENT IMPLEMENTATION REQUIRED:
-        # This method needs to retrieve all messages for a session from DynamoDB.
-        # Follow the existing service patterns for error handling and logging.
-        #
-        # Implementation steps:
-        # 1. Use self.table.query() with these parameters:
-        #    - KeyConditionExpression=Key("session_id").eq(session_id)
-        #    - ScanIndexForward=True  # For chronological order (oldest first)
-        #
-        # 2. Extract items from response: items = response.get("Items", [])
-        #
-        # 3. Handle ClientError exceptions (same pattern as save_message):
-        #    - ServiceUnavailable, InternalServerError, ThrottlingException 
-        #      -> raise ChatServiceUnavailableError("DynamoDB")
-        #    - ProvisionedThroughputExceededException 
-        #      -> raise ChatServiceUnavailableError("DynamoDB throughput exceeded")
-        #    - Other ClientError -> raise ChatError(f"DynamoDB error: {str(e)}", 500)
-        #
-        # 4. Add logging: logger.info(f"Retrieved {len(items)} messages for session {session_id}")
-        #
-        # 5. Return the list of message items
-        #
-        # Hint: Import Key from boto3.dynamodb.conditions at the top of the file
-        
-        raise NotImplementedError("Students need to implement DynamoDB message retrieval")
+        try:
+            # Query DynamoDB for all messages in the session
+            response = self.table.query(
+                KeyConditionExpression=Key("session_id").eq(session_id),
+                ScanIndexForward=True  # Chronological order (oldest first)
+            )
+            
+            # Extract items from response
+            items = response.get("Items", [])
+            logger.info(f"Retrieved {len(items)} messages for session {session_id}")
+            return items
+            
+        except ClientError as e:
+            error_code = e.response.get("Error", {}).get("Code", "")
+            
+            # Handle service unavailability
+            if error_code in ["ServiceUnavailable", "InternalServerError", "ThrottlingException"]:
+                logger.error(f"DynamoDB service unavailable: {error_code}")
+                raise ChatServiceUnavailableError("DynamoDB")
+            
+            # Handle throughput exceeded
+            if error_code == "ProvisionedThroughputExceededException":
+                logger.error("DynamoDB throughput exceeded")
+                raise ChatServiceUnavailableError("DynamoDB throughput exceeded")
+            
+            # Handle other errors
+            logger.error(f"DynamoDB error retrieving messages: {str(e)}")
+            raise ChatError(f"DynamoDB error: {str(e)}", 500)
 
