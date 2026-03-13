@@ -115,7 +115,7 @@ Required variables:
 AWS_REGION=us-east-1
 AWS_ACCESS_KEY_ID=your_key_here
 AWS_SECRET_ACCESS_KEY=your_secret_here
-BEDROCK_MODEL_ID=amazon.nova-pro-v1:0
+MODEL_ID=amazon.nova-pro-v1:0
 ```
 
 ### Step 2: Test AWS Connection
@@ -268,13 +268,13 @@ All basic endpoints plus:
 
 ```bash
 # Cheapest (good for testing)
-BEDROCK_MODEL_ID=amazon.nova-micro-v1:0
+MODEL_ID=amazon.nova-micro-v1:0
 
 # Balanced (recommended)
-BEDROCK_MODEL_ID=amazon.nova-lite-v1:0
+MODEL_ID=amazon.nova-lite-v1:0
 
 # Most capable (best quality)
-BEDROCK_MODEL_ID=amazon.nova-pro-v1:0
+MODEL_ID=amazon.nova-pro-v1:0
 ```
 
 ### Conversation Window

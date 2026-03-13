@@ -171,7 +171,7 @@ def example_hybrid_chain():
     chain = HybridConversationChain(
         memory_adapter=memory_adapter,
         retriever=retriever,
-        model_id=os.getenv('MODEL_ID', 'anthropic.claude-3-5-haiku-20241022-v1:0'),
+        model_id=os.getenv('MODEL_ID'),
         window_size=15
     )
     

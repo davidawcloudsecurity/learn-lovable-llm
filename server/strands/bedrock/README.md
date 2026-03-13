@@ -46,7 +46,7 @@ Required:
 AWS_REGION=us-east-1
 AWS_ACCESS_KEY_ID=your_key
 AWS_SECRET_ACCESS_KEY=your_secret
-BEDROCK_MODEL_ID=amazon.nova-pro-v1:0
+MODEL_ID=amazon.nova-pro-v1:0
 ```
 
 ### 5. Run Server

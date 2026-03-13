@@ -32,7 +32,7 @@ class ChatConversationChain:
         self,
         memory_adapter: DynamoDBMemoryAdapter,
         retriever: BaseRetriever,
-        model_id: str = "anthropic.claude-3-5-haiku-20241022-v1:0",
+        model_id: Optional[str] = None,
         window_size: int = 15,
     ):
         """Initialize the conversation chain.
@@ -40,12 +40,12 @@ class ChatConversationChain:
         Args:
             memory_adapter: The memory adapter to use for storing and retrieving messages
             retriever: The retriever to use for retrieving documents
-            model_id: The Bedrock model ID to use
+            model_id: The Bedrock model ID to use (defaults to MODEL_ID env var)
             window_size: The number of messages to include in the conversation window
         """
         self.memory_adapter = memory_adapter
         self.retriever = retriever
-        self.model_id = model_id
+        self.model_id = model_id or os.getenv("MODEL_ID", "anthropic.claude-3-5-haiku-20241022-v1:0")
         self.window_size = window_size
         aws_region = os.getenv("AWS_REGION", "us-east-1")        
         self.llm = ChatBedrockConverse(

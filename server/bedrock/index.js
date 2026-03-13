@@ -40,7 +40,7 @@ app.post('/api/chat', async (req, res) => {
 
     // Bedrock API call
     const command = new ConverseStreamCommand({
-      modelId: process.env.BEDROCK_MODEL_ID || 'anthropic.claude-3-5-sonnet-20241022-v2:0',
+      modelId: process.env.MODEL_ID || 'anthropic.claude-3-5-sonnet-20241022-v2:0',
       messages: bedrockMessages,
       inferenceConfig: {
         maxTokens: 2048,
@@ -77,5 +77,5 @@ app.post('/api/chat', async (req, res) => {
 
 app.listen(PORT, () => {
   console.log(`LearnLLM API server running on port ${PORT}`);
-  console.log(`Model: ${process.env.BEDROCK_MODEL_ID || 'anthropic.claude-3-5-sonnet-20241022-v2:0'}`);
+  console.log(`Model: ${process.env.MODEL_ID || 'anthropic.claude-3-5-sonnet-20241022-v2:0'}`);
 });

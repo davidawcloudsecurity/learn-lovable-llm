@@ -47,7 +47,7 @@ app.add_middleware(
 # Get configuration from environment
 PORT = int(os.getenv("PORT", "8000"))
 AWS_REGION = os.getenv("AWS_REGION", "us-west-2")
-MODEL_ID = os.getenv("BEDROCK_MODEL_ID", "anthropic.claude-3-5-haiku-20241022-v1:0")
+MODEL_ID = os.getenv("MODEL_ID", "anthropic.claude-3-5-haiku-20241022-v1:0")
 CHAT_SESSIONS_TABLE_NAME = os.getenv("CHAT_SESSIONS_TABLE_NAME", "ChatSessions")
 KNOWLEDGE_BASE_ID = os.getenv("KNOWLEDGE_BASE_ID", "")
 GUARDRAIL_ID = os.getenv("GUARDRAIL_ID", "")

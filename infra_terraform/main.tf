@@ -326,7 +326,7 @@ resource "aws_instance" "backend" {
               cat > .env <<'ENVFILE'
               PORT=8000
               AWS_REGION=us-east-1
-              BEDROCK_MODEL_ID=anthropic.claude-3-5-haiku-20241022-v1:0
+              MODEL_ID=anthropic.claude-3-5-haiku-20241022-v1:0
               CHAT_SESSIONS_TABLE_NAME=${var.project_tag}-ChatSessions
               KNOWLEDGE_BASE_ID=
               GUARDRAIL_ID=

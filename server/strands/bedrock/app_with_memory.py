@@ -26,7 +26,7 @@ load_dotenv()
 # Configuration
 PORT = int(os.getenv('PORT', 8000))
 AWS_REGION = os.getenv('AWS_REGION', 'us-east-1')
-MODEL_ID = os.getenv('BEDROCK_MODEL_ID', 'amazon.nova-pro-v1:0')
+MODEL_ID = os.getenv('MODEL_ID', 'amazon.nova-pro-v1:0')
 LOG_LEVEL = os.getenv('LOG_LEVEL', 'INFO')
 LOG_DIR = os.getenv('LOG_DIR', 'logs')
 SESSION_DIR = os.getenv('SESSION_DIR', 'sessions')

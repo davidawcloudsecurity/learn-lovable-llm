@@ -33,7 +33,7 @@ class HybridConversationChain:
         self,
         memory_adapter: DynamoDBMemoryAdapter,
         retriever: BaseRetriever,
-        model_id: str = "anthropic.claude-3-5-haiku-20241022-v1:0",
+        model_id: Optional[str] = None,
         window_size: int = 15,
     ):
         """
@@ -42,12 +42,12 @@ class HybridConversationChain:
         Args:
             memory_adapter: The memory adapter to use for storing and retrieving messages
             retriever: The retriever to use for RAG
-            model_id: The model ID to use
+            model_id: The model ID to use (defaults to MODEL_ID env var)
             window_size: The number of messages to keep in memory
         """
         self.memory_adapter = memory_adapter
         self.retriever = retriever
-        self.model_id = model_id
+        self.model_id = model_id or os.getenv("MODEL_ID", "anthropic.claude-3-5-haiku-20241022-v1:0")
         self.window_size = window_size
         
         # Get AWS region from environment variable
@@ -55,7 +55,7 @@ class HybridConversationChain:
         
         # Create the LLM
         self.llm = ChatBedrock(
-            model=model_id,
+            model=self.model_id,
             region_name=aws_region,
             model_kwargs={
                 "temperature": 0.0,
@@ -72,7 +72,7 @@ class HybridConversationChain:
         self.conversation_chain = ChatConversationChain(
             memory_adapter=memory_adapter,
             retriever=retriever,  # Use the same retriever but we'll ignore the results
-            model_id=model_id,
+            model_id=self.model_id,
             window_size=window_size,
         )
         
@@ -80,7 +80,7 @@ class HybridConversationChain:
         self.rag_chain = ChatConversationChain(
             memory_adapter=memory_adapter,
             retriever=retriever,
-            model_id=model_id,
+            model_id=self.model_id,
             window_size=window_size,
         )
         
