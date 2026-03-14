@@ -187,7 +187,7 @@ resource "aws_iam_role_policy_attachment" "ssm_policy" {
 # IAM Policy for Bedrock access
 resource "aws_iam_policy" "bedrock_policy" {
   name        = "${var.project_tag}-bedrock-policy"
-  description = "Policy for Bedrock access including models, knowledge bases, and guardrails"
+  description = "Policy for Bedrock access including models, knowledge bases, guardrails, and marketplace"
 
   policy = jsonencode({
     Version = "2012-10-17"
@@ -198,7 +198,9 @@ resource "aws_iam_policy" "bedrock_policy" {
           "bedrock:InvokeModel",
           "bedrock:InvokeModelWithResponseStream",
           "bedrock:GetFoundationModel",
-          "bedrock:ListFoundationModels"
+          "bedrock:ListFoundationModels",
+          "bedrock:Converse",
+          "bedrock:ConverseStream"
         ]
         Resource = "*"
       },
@@ -214,6 +216,15 @@ resource "aws_iam_policy" "bedrock_policy" {
         Effect = "Allow"
         Action = [
           "bedrock:ApplyGuardrail"
+        ]
+        Resource = "*"
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "aws-marketplace:ViewSubscriptions",
+          "aws-marketplace:Subscribe",
+          "aws-marketplace:Unsubscribe"
         ]
         Resource = "*"
       }
