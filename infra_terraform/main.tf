@@ -107,8 +107,8 @@ resource "aws_security_group" "frontend_sg" {
   }
 
   ingress {
-    from_port   = 443
-    to_port     = 443
+    from_port   = 22
+    to_port     = 22
     protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
   }
@@ -140,8 +140,8 @@ resource "aws_security_group" "backend_sg" {
   }
 
   ingress {
-    from_port   = 443
-    to_port     = 443
+    from_port   = 22
+    to_port     = 22
     protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
   }
@@ -426,4 +426,101 @@ resource "aws_instance" "frontend" {
   tags = {
     Name = "${var.project_tag}-frontend"
   }
+}
+
+# Elastic IP for Frontend (stable origin for CloudFront)
+resource "aws_eip" "frontend_eip" {
+  count    = var.create_vpc ? 1 : 0
+  instance = aws_instance.frontend[0].id
+  domain   = "vpc"
+
+  tags = {
+    Name = "${var.project_tag}-frontend-eip"
+  }
+}
+
+# CloudFront Distribution
+resource "aws_cloudfront_distribution" "main" {
+  count   = var.create_vpc ? 1 : 0
+  enabled = true
+  comment = "${var.project_tag} CloudFront Distribution"
+
+  origin {
+    domain_name = aws_instance.frontend[0].public_dns
+    origin_id   = "frontend-ec2"
+
+    custom_origin_config {
+      http_port              = 80
+      https_port             = 443
+      origin_protocol_policy = "http-only"
+      origin_ssl_protocols   = ["TLSv1.2"]
+      origin_read_timeout    = 30
+    }
+  }
+
+  default_cache_behavior {
+    allowed_methods        = ["GET", "HEAD", "OPTIONS"]
+    cached_methods         = ["GET", "HEAD"]
+    target_origin_id       = "frontend-ec2"
+    viewer_protocol_policy = "redirect-to-https"
+
+    forwarded_values {
+      query_string = false
+      cookies {
+        forward = "none"
+      }
+    }
+
+    min_ttl     = 0
+    default_ttl = 86400
+    max_ttl     = 31536000
+    compress    = true
+  }
+
+  # API requests — no caching, forward everything
+  ordered_cache_behavior {
+    path_pattern           = "/api/*"
+    allowed_methods        = ["DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "POST", "PUT"]
+    cached_methods         = ["GET", "HEAD"]
+    target_origin_id       = "frontend-ec2"
+    viewer_protocol_policy = "redirect-to-https"
+
+    forwarded_values {
+      query_string = true
+      headers      = ["*"]
+      cookies {
+        forward = "all"
+      }
+    }
+
+    min_ttl     = 0
+    default_ttl = 0
+    max_ttl     = 0
+    compress    = true
+  }
+
+  restrictions {
+    geo_restriction {
+      restriction_type = "none"
+    }
+  }
+
+  viewer_certificate {
+    cloudfront_default_certificate = true
+  }
+
+  tags = {
+    Name = "${var.project_tag}-cloudfront"
+  }
+}
+
+# Outputs
+output "cloudfront_domain" {
+  value       = var.create_vpc ? aws_cloudfront_distribution.main[0].domain_name : null
+  description = "CloudFront distribution domain name"
+}
+
+output "frontend_eip" {
+  value       = var.create_vpc ? aws_eip.frontend_eip[0].public_ip : null
+  description = "Frontend Elastic IP"
 }
