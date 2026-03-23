@@ -36,19 +36,21 @@ app = FastAPI(
 )
 
 # Configure CORS
+ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "http://localhost:5173").split(",")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Configure appropriately for production
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST"],
+    allow_headers=["Content-Type", "Authorization"],
 )
 
 # Get configuration from environment
-PORT = int(os.getenv("PORT", "8000"))
-AWS_REGION = os.getenv("AWS_REGION", "us-west-2")
-MODEL_ID = os.getenv("MODEL_ID", "anthropic.claude-3-5-haiku-20241022-v1:0")
-CHAT_SESSIONS_TABLE_NAME = os.getenv("CHAT_SESSIONS_TABLE_NAME", "ChatSessions")
+PORT = int(os.getenv("PORT", ""))
+AWS_REGION = os.getenv("AWS_REGION", "")
+MODEL_ID = os.getenv("MODEL_ID", "")
+CHAT_SESSIONS_TABLE_NAME = os.getenv("CHAT_SESSIONS_TABLE_NAME", "")
 KNOWLEDGE_BASE_ID = os.getenv("KNOWLEDGE_BASE_ID", "")
 GUARDRAIL_ID = os.getenv("GUARDRAIL_ID", "")
 
