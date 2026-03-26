@@ -505,8 +505,93 @@ resource "aws_lb_listener" "http" {
   }
 }
 
+# CloudFront Distribution with ALB as origin
+resource "aws_cloudfront_distribution" "main" {
+  count   = var.create_vpc ? 1 : 0
+  enabled = true
+  comment = "${var.project_tag} CloudFront Distribution"
+
+  origin {
+    domain_name = aws_lb.frontend[0].dns_name
+    origin_id   = "${var.project_tag}-alb-origin"
+
+    custom_origin_config {
+      http_port              = 80
+      https_port             = 443
+      origin_protocol_policy = "http-only"
+      origin_ssl_protocols   = ["TLSv1.2"]
+    }
+  }
+
+  default_cache_behavior {
+    allowed_methods        = ["GET", "HEAD", "OPTIONS", "PUT", "POST", "PATCH", "DELETE"]
+    cached_methods         = ["GET", "HEAD"]
+    target_origin_id       = "${var.project_tag}-alb-origin"
+    viewer_protocol_policy = "redirect-to-https"
+
+    forwarded_values {
+      query_string = true
+      headers      = ["Host", "Origin", "Authorization"]
+
+      cookies {
+        forward = "all"
+      }
+    }
+
+    min_ttl     = 0
+    default_ttl = 0
+    max_ttl     = 0
+  }
+
+  # Cache static assets
+  ordered_cache_behavior {
+    path_pattern           = "/assets/*"
+    allowed_methods        = ["GET", "HEAD", "OPTIONS"]
+    cached_methods         = ["GET", "HEAD"]
+    target_origin_id       = "${var.project_tag}-alb-origin"
+    viewer_protocol_policy = "redirect-to-https"
+
+    forwarded_values {
+      query_string = false
+
+      cookies {
+        forward = "none"
+      }
+    }
+
+    min_ttl     = 0
+    default_ttl = 86400
+    max_ttl     = 31536000
+    compress    = true
+  }
+
+  restrictions {
+    geo_restriction {
+      restriction_type = "none"
+    }
+  }
+
+  viewer_certificate {
+    cloudfront_default_certificate = true
+  }
+
+  tags = {
+    Name = "${var.project_tag}-cloudfront"
+  }
+}
+
 # Outputs
 output "alb_dns_name" {
   value       = var.create_vpc ? aws_lb.frontend[0].dns_name : null
   description = "ALB DNS name"
+}
+
+output "cloudfront_domain_name" {
+  value       = var.create_vpc ? aws_cloudfront_distribution.main[0].domain_name : null
+  description = "CloudFront distribution domain name"
+}
+
+output "cloudfront_distribution_id" {
+  value       = var.create_vpc ? aws_cloudfront_distribution.main[0].id : null
+  description = "CloudFront distribution ID"
 }
