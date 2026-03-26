@@ -107,8 +107,8 @@ resource "aws_security_group" "frontend_sg" {
   }
 
   ingress {
-    from_port   = 22
-    to_port     = 22
+    from_port   = 443
+    to_port     = 443
     protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
   }
@@ -140,8 +140,8 @@ resource "aws_security_group" "backend_sg" {
   }
 
   ingress {
-    from_port   = 22
-    to_port     = 22
+    from_port   = 443
+    to_port     = 443
     protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
   }
@@ -428,40 +428,49 @@ resource "aws_instance" "frontend" {
   }
 }
 
-# Elastic IP for Frontend (stable origin for CloudFront)
-resource "aws_eip" "frontend_eip" {
-  count    = var.create_vpc ? 1 : 0
-  instance = aws_instance.frontend[0].id
-  domain   = "vpc"
+# CloudFront VPC Origin using frontend EC2 instance ARN
+resource "aws_cloudfront_vpc_origin" "frontend" {
+  count = var.create_vpc ? 1 : 0
+
+  vpc_origin_endpoint_config {
+    name                   = "${var.project_tag}-frontend-vpc-origin"
+    arn                    = aws_instance.frontend[0].arn
+    http_port              = 80
+    https_port             = 443
+    origin_protocol_policy = "http-only"
+
+    origin_ssl_protocols {
+      items    = ["TLSv1.2"]
+      quantity = 1
+    }
+  }
 
   tags = {
-    Name = "${var.project_tag}-frontend-eip"
+    Name = "${var.project_tag}-frontend-vpc-origin"
   }
 }
 
-# CloudFront Distribution
+# CloudFront Distribution with VPC Origin
 resource "aws_cloudfront_distribution" "main" {
   count   = var.create_vpc ? 1 : 0
   enabled = true
   comment = "${var.project_tag} CloudFront Distribution"
 
   origin {
-    domain_name = aws_instance.frontend[0].public_dns
-    origin_id   = "frontend-ec2"
+    domain_name = aws_instance.frontend[0].private_dns
+    origin_id   = "frontend-vpc-origin"
 
-    custom_origin_config {
-      http_port              = 80
-      https_port             = 443
-      origin_protocol_policy = "http-only"
-      origin_ssl_protocols   = ["TLSv1.2"]
-      origin_read_timeout    = 30
+    vpc_origin_config {
+      vpc_origin_id            = aws_cloudfront_vpc_origin.frontend[0].id
+      origin_keepalive_timeout = 5
+      origin_read_timeout      = 30
     }
   }
 
   default_cache_behavior {
     allowed_methods        = ["GET", "HEAD", "OPTIONS"]
     cached_methods         = ["GET", "HEAD"]
-    target_origin_id       = "frontend-ec2"
+    target_origin_id       = "frontend-vpc-origin"
     viewer_protocol_policy = "redirect-to-https"
 
     forwarded_values {
@@ -482,7 +491,7 @@ resource "aws_cloudfront_distribution" "main" {
     path_pattern           = "/api/*"
     allowed_methods        = ["DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "POST", "PUT"]
     cached_methods         = ["GET", "HEAD"]
-    target_origin_id       = "frontend-ec2"
+    target_origin_id       = "frontend-vpc-origin"
     viewer_protocol_policy = "redirect-to-https"
 
     forwarded_values {
@@ -518,9 +527,4 @@ resource "aws_cloudfront_distribution" "main" {
 output "cloudfront_domain" {
   value       = var.create_vpc ? aws_cloudfront_distribution.main[0].domain_name : null
   description = "CloudFront distribution domain name"
-}
-
-output "frontend_eip" {
-  value       = var.create_vpc ? aws_eip.frontend_eip[0].public_ip : null
-  description = "Frontend Elastic IP"
 }
