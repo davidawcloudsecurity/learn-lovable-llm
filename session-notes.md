@@ -105,3 +105,94 @@ sudo PM2_HOME=/etc/.pm2 pm2 restart bedrock-api
 - DynamoDB persistence works — messages are saved and conversation history loads
 - QUERY/RAG intent fails because no Knowledge Base is configured (expected)
 - Guardrails are skipped (no guardrail configured)
+
+
+---
+
+# Session Notes — Strands vs LangChain Deep Dive
+
+## What We Explored
+
+Walked through the Strands backend (`server/strands/bedrock/`) and compared it to the LangChain backend (`server/bedrock/`).
+
+## Three Backend Options in This Repo
+
+| Server | Framework | Memory | Storage | Frontend compatible? |
+|---|---|---|---|---|
+| `server/bedrock/index.py` | FastAPI + LangChain | Yes (hybrid chain + DynamoDB) | DynamoDB | Yes |
+| `server/strands/bedrock/app.py` | Flask + Strands | No | None | No |
+| `server/strands/bedrock/app_with_memory.py` | Flask + Strands | Yes (sliding window) | Local JSON files | No |
+
+## Strands Agent — Not Actually Agentic
+
+The Strands `Agent` class is used here purely as a Bedrock chat client. No tools registered, no `@tool` decorators, no function calling. Just `agent("message")` → get response. The class is called "Agent" but it's acting as a simple chat wrapper.
+
+## Sliding Window Memory — Two Approaches
+
+### LangChain (DynamoDB + window)
+- All messages saved to DynamoDB (full history, forever)
+- When calling the LLM, `memory.py` fetches all messages from DynamoDB, chain sends last 15 to Bedrock
+- DynamoDB query has no `Limit` — fetches everything then slices. Could be optimized.
+- Full history available for `/api/chat/history` endpoint and UI display
+
+### Strands (RAM + local files)
+- `SlidingWindowConversationManager(window_size=10)` keeps last 10 in RAM
+- `FileSessionManager` persists to local JSON files
+- Older messages are dropped — lossy. Once they slide out, they're gone.
+
+## Intent Classification Flow
+
+1. User sends message
+2. Claude classifies it (extra LLM call): "Is this CHAT or QUERY?"
+3. CHAT → conversation chain (no Knowledge Base lookup)
+4. QUERY → RAG chain (searches Bedrock Knowledge Base, sends docs + question to Claude)
+5. Purpose: avoid unnecessary KB lookups for casual messages like "thanks" or "hello"
+
+The Strands version has no intent classification — everything goes straight to the agent.
+
+## Frontend vs Backend Mismatch
+
+The frontend (`chat-api.ts`) was built for the LangChain backend:
+
+- Sends: `{ "message": "hello", "session_id": null }` (singular string, implicit user role)
+- Expects: JSON response with `data.messages` array and `data.session_id`
+
+The Strands `app.py` expects:
+- Receives: `{ "messages": [{"role": "user", "content": "hello"}] }` (OpenAI convention, explicit role)
+- Returns: SSE stream (`data: {"text": "chunk"}\n\n`)
+
+Two mismatches: request shape and response format. To use Strands with the existing UI, either adapt the backend or rewrite the frontend.
+
+## app.py Ignores Most of Its Input
+
+Despite accepting a `messages` array, `app.py` only uses `messages[-1]['content']`. The rest of the array is thrown away. It's stateless — no memory, no session, every call is independent.
+
+## Framework Comparison
+
+- Flask ≈ Express (minimal, no opinions)
+- FastAPI ≈ Express + TypeScript + Swagger (validation, auto-docs, async built in)
+
+## Full Feature Comparison
+
+| | LangChain (`server/bedrock/`) | Strands (`server/strands/bedrock/`) |
+|---|---|---|
+| LLM call | `ChatBedrockConverse` via LangChain chain | `Agent` via Strands SDK |
+| Storage | DynamoDB | Local JSON files (or none) |
+| Memory | Full history in DynamoDB, last 15 sent to LLM | Sliding window in RAM (lossy) |
+| Intent classification | Yes — Claude classifies CHAT vs QUERY | No |
+| RAG | Yes — Bedrock Knowledge Base retriever | No |
+| Guardrails | Bedrock Guardrails on input and output | Model-level only |
+| Response format | JSON | SSE |
+| Frontend compatible? | Yes | No |
+
+## Terraform Update
+
+Updated `main.tf` backend EC2 user_data to deploy `server/strands/bedrock/app.py` instead of `server/bedrock/index.py`. Changed clone path, requirements, .env, and pm2 command.
+
+## Root `chat/` vs `server/bedrock/chat/`
+
+Nearly identical. The `server/bedrock/chat/` version adds `TokenUsage` to the response model and uses empty string defaults for env vars (reads from `.env`). The root `chat/` has hardcoded fake defaults for teaching purposes.
+
+## Can Strands Use DynamoDB?
+
+Yes. You'd save messages to DynamoDB before/after each agent call (outside of Strands), while keeping `SlidingWindowConversationManager` for what the LLM sees. Storage and memory strategy are independent concerns.
