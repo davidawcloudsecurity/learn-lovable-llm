@@ -336,8 +336,8 @@ resource "aws_instance" "backend" {
               
               # Clone repository
               cd /opt
-              git clone -b aws/main https://github.com/davidawcloudsecurity/learn-lovable-llm.git app
-              cd app/server/bedrock
+              git clone -b aws/main-strands https://github.com/davidawcloudsecurity/learn-lovable-llm.git app
+              cd app/server/strands/bedrock
               
               # Create Python virtual environment
               python3 -m venv venv
@@ -346,23 +346,12 @@ resource "aws_instance" "backend" {
               # Install Python dependencies
               pip install --upgrade pip
               pip install -r requirements.txt
-              
-              # Create .env with Terraform-interpolated values
-              cat > .env <<ENVFILE
-              PORT=8000
-              AWS_DEFAULT_REGION=us-east-1
-              MODEL_ID=us.anthropic.claude-3-5-haiku-20241022-v1:0
-              CHAT_SESSIONS_TABLE_NAME=${var.project_tag}-ChatSessions
-              KNOWLEDGE_BASE_ID=
-              GUARDRAIL_ID=fake-guardrail-id
-              GUARDRAIL_VERSION=fake-guardrail-version
-              ENVFILE
-                           
+                                        
               # Install PM2 globally
               npm install -g pm2
               
-              # Start the Python FastAPI server with PM2
-              pm2 start index.py --name bedrock-api --interpreter venv/bin/python3
+              # Start the Flask server with PM2
+              pm2 start app.py --name strands-api --interpreter venv/bin/python3
               pm2 save
               pm2 startup systemd -u root --hp /root
               EOF
@@ -395,7 +384,7 @@ resource "aws_instance" "frontend" {
               curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
               apt install -y nodejs
               cd /opt
-              git clone -b aws/main https://github.com/davidawcloudsecurity/learn-lovable-llm.git app
+              git clone -b aws/main-strands https://github.com/davidawcloudsecurity/learn-lovable-llm.git app
               cd app
               npm install
               npm run build
