@@ -346,6 +346,17 @@ resource "aws_instance" "backend" {
               # Install Python dependencies
               pip install --upgrade pip
               pip install -r requirements.txt
+              
+              # Create .env with Terraform-interpolated values
+              cat > .env <<ENVFILE
+              PORT=8000
+              AWS_DEFAULT_REGION=us-east-1
+              MODEL_ID=us.anthropic.claude-3-5-haiku-20241022-v1:0
+              CHAT_SESSIONS_TABLE_NAME=${var.project_tag}-ChatSessions
+              KNOWLEDGE_BASE_ID=
+              GUARDRAIL_ID=fake-guardrail-id
+              GUARDRAIL_VERSION=fake-guardrail-version
+              ENVFILE
                            
               # Install PM2 globally
               npm install -g pm2
