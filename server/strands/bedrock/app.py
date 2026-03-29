@@ -1,6 +1,21 @@
 """
 LearnLLM Backend - Strands Framework Version
-Replaces Node.js/Ollama with Python/AWS Bedrock
+
+This is a STATELESS chat server. Each request is independent — the server does NOT
+remember previous messages between requests. The UI is responsible for sending the
+full conversation history each time, but this server only uses the LAST message.
+
+Architecture:
+  UI (React) --POST JSON--> Flask (/api/chat) --single string--> Strands Agent ---> AWS Bedrock LLM
+                                                                                        |
+  UI <---SSE stream of text chunks--- Flask <---full response string--- Strands Agent <--'
+
+Key points:
+  - The UI sends an array of messages, but only the LAST one is used (role is ignored)
+  - The Strands Agent calls AWS Bedrock (Claude/Nova) with that single message
+  - The response comes back all at once, then gets chopped into small chunks
+    and sent to the UI as Server-Sent Events (SSE) to simulate streaming
+  - No session management, no database, no memory between requests
 """
 
 import os
@@ -11,24 +26,27 @@ from pathlib import Path
 from typing import Generator
 
 from flask import Flask, request, Response, jsonify, stream_with_context
-from flask_cors import CORS
-from dotenv import load_dotenv
-from botocore.config import Config as BotocoreConfig
+from flask_cors import CORS          # Allows the React UI (different port) to call this API
+from dotenv import load_dotenv       # Reads .env file for config like AWS_REGION, MODEL_ID
+from botocore.config import BotocoreConfig  # AWS SDK connection settings
 
-from strands import Agent
-from strands.models import BedrockModel
+from strands import Agent            # Strands framework — wraps LLM into a callable agent
+from strands.models import BedrockModel  # Connects Strands to AWS Bedrock as the LLM provider
 
-# Load environment variables
+# ---------------------------------------------------------------------------
+# CONFIGURATION — all values come from .env file, with sensible defaults
+# ---------------------------------------------------------------------------
 load_dotenv()
 
-# Configuration
-PORT = int(os.getenv('PORT', 8000))
-AWS_REGION = os.getenv('AWS_REGION', 'us-east-1')
-MODEL_ID = os.getenv('MODEL_ID', 'amazon.nova-pro-v1:0')
+PORT = int(os.getenv('PORT', 8000))              # Flask listens on this port
+AWS_REGION = os.getenv('AWS_DEFAULT_REGION', '') # Which AWS region to call Bedrock in
+MODEL_ID = os.getenv('MODEL_ID', 'amazon.nova-pro-v1:0')  # Which LLM model to use
 LOG_LEVEL = os.getenv('LOG_LEVEL', 'INFO')
 LOG_DIR = os.getenv('LOG_DIR', 'logs')
 
-# Setup logging
+# ---------------------------------------------------------------------------
+# LOGGING — writes to both a daily log file and the terminal
+# ---------------------------------------------------------------------------
 Path(LOG_DIR).mkdir(exist_ok=True)
 log_file = Path(LOG_DIR) / f"chat-{datetime.now().strftime('%Y-%m-%d')}.log"
 
@@ -36,34 +54,45 @@ logging.basicConfig(
     level=getattr(logging, LOG_LEVEL),
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler(log_file),
-        logging.StreamHandler()
+        logging.FileHandler(log_file),   # Persists logs to disk
+        logging.StreamHandler()          # Also prints to terminal
     ]
 )
 logger = logging.getLogger(__name__)
 
-# Initialize Flask app
-app = Flask(__name__)
-CORS(app)
 
-# Initialize Bedrock Model
+# ---------------------------------------------------------------------------
+# FLASK APP — the web server that receives HTTP requests from the UI
+# ---------------------------------------------------------------------------
+app = Flask(__name__)
+CORS(app)  # Without this, the browser blocks requests from localhost:8080 (UI) to localhost:8000 (API)
+
+
+# ---------------------------------------------------------------------------
+# BEDROCK MODEL — the connection to AWS's hosted LLM
+# ---------------------------------------------------------------------------
 def create_bedrock_model():
-    """Create and configure Bedrock model"""
+    """
+    Configure how we talk to AWS Bedrock (the LLM hosting service).
+    This sets timeouts, retries, and which model to use.
+    """
+    # AWS SDK connection settings — how patient we are with network issues
     boto_config = BotocoreConfig(
-        retries={"max_attempts": 3, "mode": "standard"},
-        connect_timeout=5,
-        read_timeout=60,
+        retries={"max_attempts": 3, "mode": "standard"},  # Retry up to 3 times on failure
+        connect_timeout=5,    # Wait max 5 seconds to establish connection
+        read_timeout=60,      # Wait max 60 seconds for the LLM to respond (LLMs can be slow)
         region_name=AWS_REGION
     )
     
     model_kwargs = {
         'model_id': MODEL_ID,
         'boto_client_config': boto_config,
-        'temperature': 0.1,
-        'max_tokens': 2000
+        'temperature': 0.1,   # Low = more deterministic/focused responses. High = more creative/random
+        'max_tokens': 2000    # Cap the response length (roughly ~1500 words max)
     }
     
-    # Add guardrails if configured
+    # Optional: AWS Bedrock Guardrails filter harmful/inappropriate content
+    # Only enabled if GUARDRAIL_ID is set in .env
     guardrail_id = os.getenv('GUARDRAIL_ID')
     if guardrail_id:
         model_kwargs['guardrail_id'] = guardrail_id
@@ -72,11 +101,22 @@ def create_bedrock_model():
     
     return BedrockModel(**model_kwargs)
 
-# Initialize agent
+
+# ---------------------------------------------------------------------------
+# STRANDS AGENT — the "brain" that processes user messages
+# ---------------------------------------------------------------------------
 def create_agent():
-    """Create Strands agent with Bedrock model"""
+    """
+    Create the Strands Agent. This wraps the Bedrock model with a system prompt
+    that defines the agent's personality and behavior rules.
+    
+    The agent is STATELESS — it has no memory of previous conversations.
+    Each call to agent("some message") is completely independent.
+    """
     model = create_bedrock_model()
     
+    # This system prompt is sent to the LLM with EVERY request, before the user's message.
+    # It's like giving the LLM its job description each time.
     system_prompt = """You are LearnLLM, a helpful and knowledgeable AI assistant.
 
 Your purpose is to help users learn and understand concepts clearly.
@@ -98,42 +138,53 @@ Always prioritize accuracy and helpfulness."""
     logger.info(f"Agent created with model: {MODEL_ID}")
     return agent
 
-# Create global agent instance
+
+# Create ONE agent instance when the server starts.
+# This same instance handles ALL requests (it's stateless, so that's fine).
 agent = create_agent()
 
 
+# ---------------------------------------------------------------------------
+# HELPER FUNCTIONS — logging for debugging
+# ---------------------------------------------------------------------------
 def log_request(request_id: str, messages: list):
-    """Log incoming request"""
+    """Log incoming request details for debugging"""
     logger.info(f"[{request_id}] Incoming chat request")
     logger.info(f"[{request_id}] Message count: {len(messages)}")
     logger.debug(f"[{request_id}] Messages: {json.dumps(messages, indent=2)}")
 
 
 def log_response(request_id: str, full_response: str, metadata: dict):
-    """Log complete response with metadata"""
+    """Log the complete response after it's been fully generated"""
     logger.info(f"[{request_id}] Response complete")
     logger.info(f"[{request_id}] Response length: {len(full_response)} chars")
     logger.debug(f"[{request_id}] Full response: {full_response}")
     logger.info(f"[{request_id}] Metadata: {json.dumps(metadata, indent=2)}")
 
 
+# ---------------------------------------------------------------------------
+# STREAMING — the core logic that talks to the LLM and sends chunks to the UI
+# ---------------------------------------------------------------------------
 def stream_agent_response(messages: list, request_id: str) -> Generator:
     """
-    Stream agent response using Server-Sent Events (SSE)
+    This is where the actual LLM call happens.
     
-    Args:
-        messages: List of conversation messages
-        request_id: Unique request identifier
-        
-    Yields:
-        SSE formatted data chunks
+    Flow:
+      1. Extract the last message's content from the array (ignores role, ignores history)
+      2. Send that single string to the Strands Agent → which calls AWS Bedrock
+      3. Bedrock returns the FULL response at once (not truly streamed)
+      4. We chop the response into 10-character chunks and yield them as SSE events
+         to give the UI a "typing" effect
+      5. Finally yield a [DONE] signal so the UI knows the response is complete
+    
+    SSE (Server-Sent Events) format:
+      Each chunk looks like:  data: {"text": "Hello, ho"}\n\n
+      End signal looks like:  data: [DONE]\n\n
     """
     try:
-        # Convert messages to Strands format
-        # Frontend sends: [{"role": "user", "content": "text"}]
-        # Strands expects similar format
-        
-        # Get the last user message
+        # ⚠️ THIS IS THE KEY LINE — only the LAST message matters.
+        # The 'role' field is never checked. If the array has 50 messages,
+        # the first 49 are completely ignored.
         user_message = messages[-1]['content'] if messages else ""
         
         logger.info(f"[{request_id}] Processing query: {user_message[:100]}...")
@@ -142,34 +193,41 @@ def stream_agent_response(messages: list, request_id: str) -> Generator:
         full_response = ""
         chunk_count = 0
         
-        # Call agent (Strands handles streaming internally)
+        # ---- CALL THE LLM ----
+        # agent() sends the message to Bedrock and WAITS for the complete response.
+        # This is a blocking call — nothing streams here despite the function name.
         response = agent(user_message)
         
-        # Extract response text
+        # ---- EXTRACT THE TEXT FROM THE RESPONSE ----
+        # Strands wraps the response in an object. We need to dig into it
+        # to get the actual text string.
         if hasattr(response, 'message'):
-            # Strands response format
+            # Normal case: response.message is a dict like:
+            # {'content': [{'text': 'Hello! How can I help?'}]}
             content = response.message.get('content', [])
             if content and isinstance(content, list):
-                response_text = content[0].get('text', '')
+                response_text = content[0].get('text', '')  # Get the text from first content block
             else:
                 response_text = str(content)
         else:
+            # Fallback: if the response format is unexpected, just stringify it
             response_text = str(response)
         
-        # Stream response in chunks (simulate streaming for compatibility)
+        # ---- SIMULATE STREAMING ----
+        # The LLM already returned the full response above. Now we break it into
+        # small 10-character chunks and send them one at a time to the UI.
+        # This creates a "typing" animation effect in the chat interface.
         chunk_size = 10  # characters per chunk
         for i in range(0, len(response_text), chunk_size):
             chunk = response_text[i:i + chunk_size]
             full_response += chunk
             chunk_count += 1
             
-            # Send SSE formatted data
+            # SSE format: "data: " + JSON + two newlines
             yield f"data: {json.dumps({'text': chunk})}\n\n"
         
-        # Calculate duration
+        # ---- LOG STATS ----
         duration = (datetime.now() - start_time).total_seconds()
-        
-        # Log completion
         metadata = {
             'duration': f"{duration:.2f}s",
             'chunk_count': chunk_count,
@@ -177,18 +235,28 @@ def stream_agent_response(messages: list, request_id: str) -> Generator:
         }
         log_response(request_id, full_response, metadata)
         
-        # Send completion signal
+        # ---- SIGNAL COMPLETION ----
+        # The UI watches for this exact string to know the response is finished
         yield "data: [DONE]\n\n"
         
     except Exception as e:
         logger.error(f"[{request_id}] Error: {str(e)}", exc_info=True)
+        # Send the error to the UI so it can display it
         error_data = json.dumps({'error': str(e)})
         yield f"data: {error_data}\n\n"
 
 
+# ===========================================================================
+# API ENDPOINTS — the URLs the UI calls
+# ===========================================================================
+
 @app.route('/api/health', methods=['GET'])
 def health_check():
-    """Health check endpoint"""
+    """
+    GET /api/health
+    Simple "is the server alive?" check. The UI or monitoring tools can ping this.
+    Returns basic info about which model and region are configured.
+    """
     return jsonify({
         'status': 'ok',
         'service': 'LearnLLM API (Strands + Bedrock)',
@@ -200,19 +268,30 @@ def health_check():
 @app.route('/api/chat', methods=['POST'])
 def chat():
     """
-    Chat endpoint with streaming support
+    POST /api/chat — THE MAIN ENDPOINT
     
-    Request body:
+    This is what the UI calls when the user sends a message.
+    
+    What the UI sends (request body):
     {
         "messages": [
-            {"role": "user", "content": "Hello"},
-            {"role": "assistant", "content": "Hi there!"},
-            {"role": "user", "content": "How are you?"}
+            {"role": "user", "content": "What is Python?"},        ← ignored
+            {"role": "assistant", "content": "Python is..."},      ← ignored
+            {"role": "user", "content": "How about JavaScript?"}   ← THIS is the only one used
         ]
     }
     
-    Response: Server-Sent Events (SSE) stream
+    What the UI receives (SSE stream):
+        data: {"text": "JavaScript"}
+        data: {"text": " is a pro"}
+        data: {"text": "gramming l"}
+        ...
+        data: [DONE]
+    
+    Note: The "role" field in each message is NEVER checked by this server.
+    Only messages[-1]['content'] matters.
     """
+    # Generate a unique ID for this request (used in log messages for tracing)
     request_id = str(int(datetime.now().timestamp() * 1000))
     
     try:
@@ -222,16 +301,16 @@ def chat():
         if not messages:
             return jsonify({'error': 'Messages array is required'}), 400
         
-        # Log request
         log_request(request_id, messages)
         
-        # Stream response
+        # Return an SSE stream (not a regular JSON response)
+        # stream_with_context keeps the Flask request context alive during streaming
         return Response(
             stream_with_context(stream_agent_response(messages, request_id)),
-            mimetype='text/event-stream',
+            mimetype='text/event-stream',  # Tells the browser this is an SSE stream
             headers={
-                'Cache-Control': 'no-cache',
-                'X-Accel-Buffering': 'no'
+                'Cache-Control': 'no-cache',       # Don't cache streamed responses
+                'X-Accel-Buffering': 'no'           # Tell nginx (if present) not to buffer
             }
         )
         
@@ -246,10 +325,9 @@ def chat():
 @app.route('/api/logs', methods=['GET'])
 def get_logs():
     """
-    Get recent logs
-    
-    Query params:
-    - lines: Number of recent lines to return (default: 50)
+    GET /api/logs?lines=50
+    Debug endpoint — returns recent log lines from today's log file.
+    Useful for checking what happened without SSH-ing into the server.
     """
     try:
         lines = int(request.args.get('lines', 50))
@@ -261,10 +339,9 @@ def get_logs():
                 'message': 'No logs for today'
             })
         
-        # Read last N lines
         with open(log_file, 'r') as f:
             all_lines = f.readlines()
-            recent_lines = all_lines[-lines:]
+            recent_lines = all_lines[-lines:]  # Only return the last N lines
         
         return jsonify({
             'logs': recent_lines,
@@ -279,7 +356,11 @@ def get_logs():
 
 @app.route('/api/model-info', methods=['GET'])
 def model_info():
-    """Get information about the current model"""
+    """
+    GET /api/model-info
+    Returns metadata about the current model configuration.
+    Useful for the UI to display "Powered by ___" or similar.
+    """
     return jsonify({
         'model_id': MODEL_ID,
         'region': AWS_REGION,
@@ -289,6 +370,9 @@ def model_info():
     })
 
 
+# ===========================================================================
+# SERVER STARTUP — only runs when you execute this file directly
+# ===========================================================================
 if __name__ == '__main__':
     logger.info("=" * 80)
     logger.info("LearnLLM Backend - Strands Framework")
@@ -299,8 +383,10 @@ if __name__ == '__main__':
     logger.info(f"Log directory: {LOG_DIR}")
     logger.info("=" * 80)
     
+    # host='0.0.0.0' means accept connections from any IP (not just localhost)
+    # This is needed if the UI runs on a different machine or in a container
     app.run(
         host='0.0.0.0',
         port=PORT,
-        debug=(os.getenv('FLASK_ENV') == 'development')
+        debug=(os.getenv('FLASK_ENV') == 'development')  # Auto-reload on code changes in dev
     )
