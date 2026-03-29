@@ -13,13 +13,12 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from dotenv import load_dotenv
+# Load environment variables
+load_dotenv()
 
 # Import chat module components
 from chat.handler import chat_handler, get_session_history_handler
 from chat.models import ChatRequest, ChatHistoryRequest
-
-# Load environment variables
-load_dotenv()
 
 # Configure logging
 logging.basicConfig(
