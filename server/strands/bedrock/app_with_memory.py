@@ -1,6 +1,32 @@
 """
 LearnLLM Backend - Strands Framework with Conversation Memory
-Advanced version with session management and memory
+
+This is the STATEFUL version of the chat server. Unlike app.py (which forgets
+everything after each request), this version REMEMBERS previous messages in a
+conversation using two mechanisms:
+
+  1. SlidingWindowConversationManager — keeps the last N messages in RAM so the
+     LLM can see recent context (like short-term memory)
+  2. FileSessionManager — saves the full conversation to a JSON file on disk
+     so it survives server restarts (like long-term memory)
+
+Architecture:
+  UI --POST {messages, session_id}--> Flask (/api/chat)
+                                        |
+                                        v
+                                  agent_cache[session_id]  ← reuses the SAME agent for a session
+                                        |
+                                        v
+                                  Strands Agent (has memory of past messages)
+                                        |
+                                        v
+                                  AWS Bedrock LLM (sees system prompt + recent history + new message)
+                                        |
+  UI <---SSE stream--- Flask <--- response text
+
+Key difference from app.py:
+  - app.py: ONE global agent, no memory, every request is independent
+  - app_with_memory.py: ONE agent PER SESSION, each remembers its conversation history
 """
 
 import os
@@ -17,26 +43,34 @@ from botocore.config import Config as BotocoreConfig
 
 from strands import Agent
 from strands.models import BedrockModel
+# SlidingWindowConversationManager: keeps only the last N messages in the agent's
+# context window. Without this, the conversation would grow forever and eventually
+# exceed the LLM's token limit (or get very expensive).
 from strands.agent.conversation_manager import SlidingWindowConversationManager
+# FileSessionManager: saves/loads conversation state to/from JSON files on disk.
+# This means if the server restarts, conversations are NOT lost.
 from strands.session.file_session_manager import FileSessionManager
 
-# Load environment variables
+# ---------------------------------------------------------------------------
+# CONFIGURATION
+# ---------------------------------------------------------------------------
 load_dotenv()
 
-# Configuration
-PORT = int(os.getenv('PORT', 8000))
-AWS_REGION = os.getenv('AWS_REGION', 'us-east-1')
-MODEL_ID = os.getenv('MODEL_ID', 'amazon.nova-pro-v1:0')
-LOG_LEVEL = os.getenv('LOG_LEVEL', 'INFO')
-LOG_DIR = os.getenv('LOG_DIR', 'logs')
-SESSION_DIR = os.getenv('SESSION_DIR', 'sessions')
-CONVERSATION_WINDOW = int(os.getenv('CONVERSATION_WINDOW', 10))
+PORT = int(os.getenv('PORT'))
+AWS_REGION = os.getenv('AWS_DEFAULT_REGION', '')
+MODEL_ID = os.getenv('MODEL_ID', '')
+LOG_LEVEL = os.getenv('LOG_LEVEL', '')
+LOG_DIR = os.getenv('LOG_DIR', '')
+SESSION_DIR = os.getenv('SESSION_DIR', '')        # Where conversation JSON files are stored on disk
+CONVERSATION_WINDOW = int(os.getenv('CONVERSATION_WINDOW'))  # How many recent messages the LLM sees
 
-# Setup directories
+
+# ---------------------------------------------------------------------------
+# LOGGING & DIRECTORIES
+# ---------------------------------------------------------------------------
 Path(LOG_DIR).mkdir(exist_ok=True)
-Path(SESSION_DIR).mkdir(exist_ok=True)
+Path(SESSION_DIR).mkdir(exist_ok=True)  # Create session storage folder if it doesn't exist
 
-# Setup logging
 log_file = Path(LOG_DIR) / f"chat-{datetime.now().strftime('%Y-%m-%d')}.log"
 
 logging.basicConfig(
@@ -49,16 +83,30 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Initialize Flask app
+# ---------------------------------------------------------------------------
+# FLASK APP
+# ---------------------------------------------------------------------------
 app = Flask(__name__)
 CORS(app)
 
-# Agent cache (session_id -> agent)
+# ---------------------------------------------------------------------------
+# AGENT CACHE — this is the core of the memory system
+# ---------------------------------------------------------------------------
+# A dictionary mapping session_id -> Agent instance.
+# Each session gets its OWN agent with its OWN conversation history.
+# Example: {"session-1234": Agent(...), "session-5678": Agent(...)}
+#
+# ⚠️ WARNING: This lives in RAM. If the server restarts, the cache is empty.
+# The FileSessionManager handles persistence to disk, but the agents themselves
+# need to be recreated (they'll reload history from the JSON files).
 agent_cache: Dict[str, Agent] = {}
 
 
+# ---------------------------------------------------------------------------
+# BEDROCK MODEL — same as app.py, just the LLM connection config
+# ---------------------------------------------------------------------------
 def create_bedrock_model():
-    """Create and configure Bedrock model"""
+    """Create and configure Bedrock model (identical to app.py)"""
     boto_config = BotocoreConfig(
         retries={"max_attempts": 3, "mode": "standard"},
         connect_timeout=5,
@@ -73,7 +121,6 @@ def create_bedrock_model():
         'max_tokens': 2000
     }
     
-    # Add guardrails if configured
     guardrail_id = os.getenv('GUARDRAIL_ID')
     if guardrail_id:
         model_kwargs['guardrail_id'] = guardrail_id
@@ -82,16 +129,28 @@ def create_bedrock_model():
     return BedrockModel(**model_kwargs)
 
 
+# ---------------------------------------------------------------------------
+# AGENT CREATION — this is where memory gets wired in
+# ---------------------------------------------------------------------------
 def create_agent(session_id: str = None, use_memory: bool = True):
     """
-    Create Strands agent with optional memory
+    Create a Strands Agent, optionally with conversation memory.
     
-    Args:
-        session_id: Unique session identifier for persistent memory
-        use_memory: Whether to enable conversation memory
+    Without memory (use_memory=False):
+      - Behaves exactly like app.py — each call is independent
+      - Used when no session_id is provided (anonymous/one-off chat)
+    
+    With memory (use_memory=True):
+      - SlidingWindowConversationManager: keeps last CONVERSATION_WINDOW messages
+        in the agent's context. Older messages get dropped so we don't exceed
+        the LLM's token limit. Example: if window=20, the LLM sees the last
+        20 messages (10 user + 10 assistant turns).
+      - FileSessionManager: saves the conversation to disk as a JSON file at
+        SESSION_DIR/{session_id}.json. This means conversations survive restarts.
     """
     model = create_bedrock_model()
     
+    # System prompt now mentions "remember context" since this agent CAN do that
     system_prompt = """You are LearnLLM, a helpful and knowledgeable AI assistant.
 
 Your purpose is to help users learn and understand concepts clearly.
@@ -112,12 +171,15 @@ Always prioritize accuracy and helpfulness."""
     }
     
     if use_memory:
-        # Add sliding window conversation manager
+        # Sliding window: only keep the last N messages in the LLM's context.
+        # Without this, a long conversation would eventually hit the token limit
+        # and either error out or get very expensive.
         agent_kwargs['conversation_manager'] = SlidingWindowConversationManager(
             window_size=CONVERSATION_WINDOW
         )
         
-        # Add session persistence if session_id provided
+        # File persistence: save conversation to disk so it survives server restarts.
+        # Each session gets its own JSON file: SESSION_DIR/session-1234.json
         if session_id:
             agent_kwargs['session_manager'] = FileSessionManager(
                 session_id=session_id,
@@ -129,36 +191,59 @@ Always prioritize accuracy and helpfulness."""
     return agent
 
 
+# ---------------------------------------------------------------------------
+# AGENT CACHE LOOKUP — reuse agents so memory persists across requests
+# ---------------------------------------------------------------------------
 def get_or_create_agent(session_id: str = None) -> Agent:
-    """Get existing agent from cache or create new one"""
+    """
+    Look up an existing agent for this session, or create a new one.
+    
+    This is critical for memory to work:
+      - If we created a NEW agent every request, it would have no memory
+        (even with FileSessionManager, the sliding window would be empty)
+      - By REUSING the same agent instance, the SlidingWindowConversationManager
+        already has the recent messages loaded in RAM
+    
+    Flow:
+      session_id=None  → create a throwaway agent with no memory
+      session_id="abc" → check cache → found? reuse it : create new & cache it
+    """
     if not session_id:
-        # No session, create temporary agent
+        # No session = anonymous chat, no memory, no persistence
         return create_agent(use_memory=False)
     
     if session_id not in agent_cache:
+        # First request for this session — create agent and cache it
         agent_cache[session_id] = create_agent(session_id=session_id, use_memory=True)
         logger.info(f"Created new agent for session: {session_id}")
     
+    # Return the cached agent (which remembers previous messages)
     return agent_cache[session_id]
 
 
+# ---------------------------------------------------------------------------
+# STREAMING — same fake-streaming approach as app.py
+# ---------------------------------------------------------------------------
 def stream_agent_response(messages: list, request_id: str, session_id: str = None) -> Generator:
     """
-    Stream agent response using Server-Sent Events (SSE)
+    Call the LLM and stream the response back as SSE chunks.
     
-    Args:
-        messages: List of conversation messages
-        request_id: Unique request identifier
-        session_id: Optional session ID for memory
-        
-    Yields:
-        SSE formatted data chunks
+    Same as app.py EXCEPT:
+      - The agent is session-aware (get_or_create_agent looks up the cached agent)
+      - The agent already knows the conversation history from previous requests
+      - So even though we only send messages[-1], the agent's internal memory
+        provides the context of earlier messages
+    
+    This means the UI could send JUST the latest message and the agent would
+    still understand the conversation context. The full messages array from the
+    UI is redundant here — only the last entry is used (same as app.py).
     """
     try:
-        # Get or create agent
+        # Get the session-aware agent (with memory) or a throwaway one
         agent = get_or_create_agent(session_id)
         
-        # Get the last user message
+        # Still only uses the LAST message, same as app.py.
+        # But now the agent's internal memory provides the conversation context.
         user_message = messages[-1]['content'] if messages else ""
         
         logger.info(f"[{request_id}] Processing query: {user_message[:100]}...")
@@ -169,10 +254,10 @@ def stream_agent_response(messages: list, request_id: str, session_id: str = Non
         full_response = ""
         chunk_count = 0
         
-        # Call agent
+        # Call the agent — it sees: system_prompt + recent history (from memory) + this new message
         response = agent(user_message)
         
-        # Extract response text
+        # Extract text from Strands response (same as app.py)
         if hasattr(response, 'message'):
             content = response.message.get('content', [])
             if content and isinstance(content, list):
@@ -182,19 +267,15 @@ def stream_agent_response(messages: list, request_id: str, session_id: str = Non
         else:
             response_text = str(response)
         
-        # Stream response in chunks
+        # Fake-stream in 10-char chunks (same as app.py)
         chunk_size = 10
         for i in range(0, len(response_text), chunk_size):
             chunk = response_text[i:i + chunk_size]
             full_response += chunk
             chunk_count += 1
-            
             yield f"data: {json.dumps({'text': chunk})}\n\n"
         
-        # Calculate duration
         duration = (datetime.now() - start_time).total_seconds()
-        
-        # Log completion
         metadata = {
             'duration': f"{duration:.2f}s",
             'chunk_count': chunk_count,
@@ -203,7 +284,6 @@ def stream_agent_response(messages: list, request_id: str, session_id: str = Non
         }
         logger.info(f"[{request_id}] Response complete: {json.dumps(metadata)}")
         
-        # Send completion signal
         yield "data: [DONE]\n\n"
         
     except Exception as e:
@@ -212,9 +292,16 @@ def stream_agent_response(messages: list, request_id: str, session_id: str = Non
         yield f"data: {error_data}\n\n"
 
 
+# ===========================================================================
+# API ENDPOINTS
+# ===========================================================================
+
 @app.route('/api/health', methods=['GET'])
 def health_check():
-    """Health check endpoint"""
+    """
+    GET /api/health
+    Same as app.py but also reports memory-related features.
+    """
     return jsonify({
         'status': 'ok',
         'service': 'LearnLLM API (Strands + Bedrock + Memory)',
@@ -223,7 +310,7 @@ def health_check():
         'features': {
             'conversation_memory': True,
             'session_persistence': True,
-            'window_size': CONVERSATION_WINDOW
+            'window_size': CONVERSATION_WINDOW  # How many messages the LLM can "see"
         }
     })
 
@@ -231,31 +318,40 @@ def health_check():
 @app.route('/api/chat', methods=['POST'])
 def chat():
     """
-    Chat endpoint with streaming and memory support
+    POST /api/chat — THE MAIN ENDPOINT (now with optional session support)
     
-    Request body:
+    What the UI sends:
     {
         "messages": [
-            {"role": "user", "content": "Hello"},
-            {"role": "assistant", "content": "Hi there!"},
-            {"role": "user", "content": "How are you?"}
+            {"role": "user", "content": "What is Python?"},
+            {"role": "assistant", "content": "Python is..."},
+            {"role": "user", "content": "How about JavaScript?"}
         ],
-        "session_id": "optional-session-id"  // For persistent memory
+        "session_id": "session-1234567890"   ← OPTIONAL, new field vs app.py
     }
+    
+    If session_id is provided:
+      - The server reuses the same agent (with memory of past messages)
+      - The agent already knows the conversation context
+      - Only messages[-1] is sent to the LLM, but it sees history from memory
+    
+    If session_id is omitted:
+      - Behaves exactly like app.py — stateless, no memory
+    
+    Response: SSE stream (same format as app.py)
     """
     request_id = str(int(datetime.now().timestamp() * 1000))
     
     try:
         data = request.get_json()
         messages = data.get('messages', [])
-        session_id = data.get('session_id')  # Optional
+        session_id = data.get('session_id')  # NEW: optional session ID for memory
         
         if not messages:
             return jsonify({'error': 'Messages array is required'}), 400
         
         logger.info(f"[{request_id}] Chat request - {len(messages)} messages")
         
-        # Stream response
         return Response(
             stream_with_context(stream_agent_response(messages, request_id, session_id)),
             mimetype='text/event-stream',
@@ -273,9 +369,21 @@ def chat():
         }), 500
 
 
+# ---------------------------------------------------------------------------
+# SESSION MANAGEMENT ENDPOINTS — these don't exist in app.py
+# ---------------------------------------------------------------------------
+
 @app.route('/api/session/new', methods=['POST'])
 def new_session():
-    """Create a new session"""
+    """
+    POST /api/session/new
+    Creates a new session ID. The UI calls this when the user clicks "New Chat".
+    
+    Returns: {"session_id": "session-1711234567890", "created_at": "..."}
+    
+    Note: This just generates an ID — the actual agent is created lazily
+    on the first /api/chat request that uses this session_id.
+    """
     session_id = f"session-{int(datetime.now().timestamp() * 1000)}"
     return jsonify({
         'session_id': session_id,
@@ -285,13 +393,17 @@ def new_session():
 
 @app.route('/api/session/<session_id>', methods=['DELETE'])
 def delete_session(session_id: str):
-    """Delete a session and its history"""
+    """
+    DELETE /api/session/{session_id}
+    Deletes a session — removes the agent from cache AND deletes the JSON file from disk.
+    After this, the conversation is gone forever.
+    """
     try:
-        # Remove from cache
+        # Remove from in-memory cache (frees RAM)
         if session_id in agent_cache:
             del agent_cache[session_id]
         
-        # Delete session file
+        # Delete the JSON file from disk (removes persistent history)
         session_file = Path(SESSION_DIR) / f"{session_id}.json"
         if session_file.exists():
             session_file.unlink()
@@ -309,14 +421,18 @@ def delete_session(session_id: str):
 
 @app.route('/api/sessions', methods=['GET'])
 def list_sessions():
-    """List all active sessions"""
+    """
+    GET /api/sessions
+    Lists all saved sessions by scanning the SESSION_DIR for JSON files.
+    The UI could use this to show a sidebar of past conversations.
+    """
     try:
         session_files = list(Path(SESSION_DIR).glob('*.json'))
         sessions = []
         
         for file in session_files:
             sessions.append({
-                'session_id': file.stem,
+                'session_id': file.stem,                    # filename without .json
                 'created_at': datetime.fromtimestamp(file.stat().st_ctime).isoformat(),
                 'modified_at': datetime.fromtimestamp(file.stat().st_mtime).isoformat()
             })
@@ -331,9 +447,16 @@ def list_sessions():
         return jsonify({'error': str(e)}), 500
 
 
+# ---------------------------------------------------------------------------
+# UTILITY ENDPOINTS — same as app.py
+# ---------------------------------------------------------------------------
+
 @app.route('/api/logs', methods=['GET'])
 def get_logs():
-    """Get recent logs"""
+    """
+    GET /api/logs?lines=50
+    Debug endpoint — returns recent log lines from today's log file.
+    """
     try:
         lines = int(request.args.get('lines', 50))
         log_file = Path(LOG_DIR) / f"chat-{datetime.now().strftime('%Y-%m-%d')}.log"
@@ -356,7 +479,10 @@ def get_logs():
 
 @app.route('/api/model-info', methods=['GET'])
 def model_info():
-    """Get model and configuration information"""
+    """
+    GET /api/model-info
+    Returns model config + memory-specific info like window size and active session count.
+    """
     return jsonify({
         'model_id': MODEL_ID,
         'region': AWS_REGION,
@@ -368,10 +494,13 @@ def model_info():
             'window_size': CONVERSATION_WINDOW,
             'guardrails_enabled': bool(os.getenv('GUARDRAIL_ID'))
         },
-        'active_sessions': len(agent_cache)
+        'active_sessions': len(agent_cache)  # How many agents are currently in RAM
     })
 
 
+# ===========================================================================
+# SERVER STARTUP
+# ===========================================================================
 if __name__ == '__main__':
     logger.info("=" * 80)
     logger.info("LearnLLM Backend - Strands Framework with Memory")
