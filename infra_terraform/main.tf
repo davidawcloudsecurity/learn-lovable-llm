@@ -331,8 +331,8 @@ resource "aws_instance" "backend" {
               apt install -y git curl python3 python3-pip python3-venv
               
               # Install Node.js
-              # curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash - # remove because use python
-              # apt install -y nodejs
+              curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash - # remove because use python
+              apt install -y nodejs # this is for pm2
               
               # Clone repository
               cd /opt
