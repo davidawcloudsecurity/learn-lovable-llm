@@ -53,10 +53,6 @@ jobs:
       
       - name: Terraform Destroy Targeted Resources
         run: |
-          terraform state rm aws_lb.frontend[0]
-          terraform state rm aws_lb_target_group.frontend[0]
-          terraform state rm aws_lb_target_group_attachment.frontend[0]
-          terraform state rm aws_lb_listener.http[0]
           terraform destroy -auto-approve -input=false
           echo "Cleaning up any existing IAM resources..."
           aws iam remove-role-from-instance-profile --instance-profile-name ${{ env.IAM_PROFILE_NAME }} --role-name ${{ env.IAM_ROLE_NAME }} 2>/dev/null || true
