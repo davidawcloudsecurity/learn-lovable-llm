@@ -24,7 +24,7 @@ jobs:
       - name: configure aws credentials
         uses: aws-actions/configure-aws-credentials@v1.7.0
         with:
-          role-to-assume: arn:aws:iam::421041021814:role/GithubActions #change to reflect your IAM role’s ARN
+          role-to-assume: arn:aws:iam::762595429056:role/GithubActions #change to reflect your IAM role’s ARN
           role-session-name: GitHub_to_AWS_via_FederatedOIDC
           aws-region: ${{ env.AWS_REGION }}
 
@@ -49,7 +49,7 @@ jobs:
                   echo "Found existing state, copying to working directory..."
                   cp state/terraform.tfstate ./terraform.tfstate
               fi
-              git checkout main
+              git checkout aws/main/strands/rag
           fi
           
           # Clean up any orphaned IAM resources before applying
