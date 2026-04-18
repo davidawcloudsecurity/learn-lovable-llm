@@ -336,7 +336,7 @@ resource "aws_instance" "backend" {
               
               # Clone repository
               cd /opt
-              git clone -b aws/main-strands https://github.com/davidawcloudsecurity/learn-lovable-llm.git app
+              git clone -b aws/main/strands/rag https://github.com/davidawcloudsecurity/learn-lovable-llm.git app
               cd app/server/strands/bedrock
               
               # Create Python virtual environment
@@ -384,7 +384,7 @@ resource "aws_instance" "frontend" {
               curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
               apt install -y nodejs
               cd /opt
-              git clone -b aws/main-strands https://github.com/davidawcloudsecurity/learn-lovable-llm.git app
+              git clone -b aws/main/strands/rag https://github.com/davidawcloudsecurity/learn-lovable-llm.git app
               cd app
               npm install
               npm run build
