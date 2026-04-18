@@ -92,7 +92,34 @@ resource "aws_route_table_association" "public_rta" {
   route_table_id = aws_route_table.public_rt[0].id
 }
 
-# Security Group for Frontend
+# Security Group for ALB (internet-facing)
+resource "aws_security_group" "alb_sg" {
+  count       = var.create_vpc ? 1 : 0
+  name        = "${var.project_tag}-alb-sg"
+  description = "Security group for ALB"
+  vpc_id      = aws_vpc.demo_main_vpc[0].id
+
+  ingress {
+    from_port       = 80
+    to_port         = 80
+    protocol        = "tcp"
+    prefix_list_ids = ["pl-3b927c52"]
+    description     = "Allow HTTP from CloudFront (com.amazonaws.global.cloudfront.origin-facing)"
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = {
+    Name = "${var.project_tag}-alb-sg"
+  }
+}
+
+# Security Group for Frontend — only allows traffic from ALB
 resource "aws_security_group" "frontend_sg" {
   count       = var.create_vpc ? 1 : 0
   name        = "${var.project_tag}-frontend-sg"
@@ -100,17 +127,10 @@ resource "aws_security_group" "frontend_sg" {
   vpc_id      = aws_vpc.demo_main_vpc[0].id
 
   ingress {
-    from_port   = 80
-    to_port     = 80
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  ingress {
-    from_port   = 443
-    to_port     = 443
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
+    from_port       = 80
+    to_port         = 80
+    protocol        = "tcp"
+    security_groups = [aws_security_group.alb_sg[0].id]
   }
 
   egress {
@@ -125,7 +145,7 @@ resource "aws_security_group" "frontend_sg" {
   }
 }
 
-# Security Group for Backend
+# Security Group for Backend — only allows traffic from within VPC
 resource "aws_security_group" "backend_sg" {
   count       = var.create_vpc ? 1 : 0
   name        = "${var.project_tag}-backend-sg"
@@ -136,14 +156,8 @@ resource "aws_security_group" "backend_sg" {
     from_port   = 8000
     to_port     = 8000
     protocol    = "tcp"
-    cidr_blocks = ["172.16.0.0/16"]
-  }
-
-  ingress {
-    from_port   = 443
-    to_port     = 443
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
+    security_groups = [aws_security_group.frontend_sg[0].id]
+    description     = "Allow traffic from frontend EC2"
   }
 
   egress {
@@ -317,13 +331,13 @@ resource "aws_instance" "backend" {
               apt install -y git curl python3 python3-pip python3-venv
               
               # Install Node.js
-              curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
-              apt install -y nodejs
+              curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash - # remove because use python
+              apt install -y nodejs # this is for pm2
               
               # Clone repository
               cd /opt
-              git clone https://github.com/davidawcloudsecurity/learn-lovable-llm.git app
-              cd app/server/bedrock
+              git clone -b aws/main-strands https://github.com/davidawcloudsecurity/learn-lovable-llm.git app
+              cd app/server/strands/bedrock
               
               # Create Python virtual environment
               python3 -m venv venv
@@ -332,23 +346,12 @@ resource "aws_instance" "backend" {
               # Install Python dependencies
               pip install --upgrade pip
               pip install -r requirements.txt
-              
-              # Create .env file with AWS configuration
-              cat > .env <<'ENVFILE'
-              PORT=8000
-              AWS_REGION=us-east-1
-              MODEL_ID=anthropic.claude-3-5-haiku-20241022-v1:0
-              CHAT_SESSIONS_TABLE_NAME=${var.project_tag}-ChatSessions
-              KNOWLEDGE_BASE_ID=
-              GUARDRAIL_ID=
-              GUARDRAIL_VERSION=
-              ENVFILE
-              
+                                        
               # Install PM2 globally
               npm install -g pm2
               
-              # Start the Python FastAPI server with PM2
-              pm2 start index.py --name bedrock-api --interpreter venv/bin/python3
+              # Start the Flask server with PM2
+              pm2 start app.py --name strands-api --interpreter venv/bin/python3
               pm2 save
               pm2 startup systemd -u root --hp /root
               EOF
@@ -381,7 +384,7 @@ resource "aws_instance" "frontend" {
               curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
               apt install -y nodejs
               cd /opt
-              git clone https://github.com/davidawcloudsecurity/learn-lovable-llm.git app
+              git clone -b aws/main-strands https://github.com/davidawcloudsecurity/learn-lovable-llm.git app
               cd app
               npm install
               npm run build
@@ -426,4 +429,153 @@ resource "aws_instance" "frontend" {
   tags = {
     Name = "${var.project_tag}-frontend"
   }
+}
+
+# Application Load Balancer
+resource "aws_lb" "frontend" {
+  count              = var.create_vpc ? 1 : 0
+  name               = "${var.project_tag}-alb"
+  internal           = false
+  load_balancer_type = "application"
+  security_groups    = [aws_security_group.alb_sg[0].id]
+  subnets            = aws_subnet.public_subnet_01[*].id
+
+  tags = {
+    Name = "${var.project_tag}-alb"
+  }
+}
+
+# Target Group for Frontend EC2
+resource "aws_lb_target_group" "frontend" {
+  count    = var.create_vpc ? 1 : 0
+  name     = "${var.project_tag}-frontend-tg"
+  port     = 80
+  protocol = "HTTP"
+  vpc_id   = aws_vpc.demo_main_vpc[0].id
+
+  health_check {
+    path                = "/"
+    protocol            = "HTTP"
+    healthy_threshold   = 2
+    unhealthy_threshold = 3
+    timeout             = 5
+    interval            = 30
+    matcher             = "200"
+  }
+
+  tags = {
+    Name = "${var.project_tag}-frontend-tg"
+  }
+}
+
+# Register Frontend EC2 with Target Group
+resource "aws_lb_target_group_attachment" "frontend" {
+  count            = var.create_vpc ? 1 : 0
+  target_group_arn = aws_lb_target_group.frontend[0].arn
+  target_id        = aws_instance.frontend[0].id
+  port             = 80
+}
+
+# ALB Listener on port 80
+resource "aws_lb_listener" "http" {
+  count             = var.create_vpc ? 1 : 0
+  load_balancer_arn = aws_lb.frontend[0].arn
+  port              = 80
+  protocol          = "HTTP"
+
+  default_action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.frontend[0].arn
+  }
+}
+
+# CloudFront Distribution with ALB as origin
+resource "aws_cloudfront_distribution" "main" {
+  count   = var.create_vpc ? 1 : 0
+  enabled = true
+  comment = "${var.project_tag} CloudFront Distribution"
+
+  origin {
+    domain_name = aws_lb.frontend[0].dns_name
+    origin_id   = "${var.project_tag}-alb-origin"
+
+    custom_origin_config {
+      http_port              = 80
+      https_port             = 443
+      origin_protocol_policy = "http-only"
+      origin_ssl_protocols   = ["TLSv1.2"]
+    }
+  }
+
+  default_cache_behavior {
+    allowed_methods        = ["GET", "HEAD", "OPTIONS", "PUT", "POST", "PATCH", "DELETE"]
+    cached_methods         = ["GET", "HEAD"]
+    target_origin_id       = "${var.project_tag}-alb-origin"
+    viewer_protocol_policy = "redirect-to-https"
+
+    forwarded_values {
+      query_string = true
+      headers      = ["Host", "Origin", "Authorization"]
+
+      cookies {
+        forward = "all"
+      }
+    }
+
+    min_ttl     = 0
+    default_ttl = 0
+    max_ttl     = 0
+  }
+
+  # Cache static assets
+  ordered_cache_behavior {
+    path_pattern           = "/assets/*"
+    allowed_methods        = ["GET", "HEAD", "OPTIONS"]
+    cached_methods         = ["GET", "HEAD"]
+    target_origin_id       = "${var.project_tag}-alb-origin"
+    viewer_protocol_policy = "redirect-to-https"
+
+    forwarded_values {
+      query_string = false
+
+      cookies {
+        forward = "none"
+      }
+    }
+
+    min_ttl     = 0
+    default_ttl = 86400
+    max_ttl     = 31536000
+    compress    = true
+  }
+
+  restrictions {
+    geo_restriction {
+      restriction_type = "none"
+    }
+  }
+
+  viewer_certificate {
+    cloudfront_default_certificate = true
+  }
+
+  tags = {
+    Name = "${var.project_tag}-cloudfront"
+  }
+}
+
+# Outputs
+output "alb_dns_name" {
+  value       = var.create_vpc ? aws_lb.frontend[0].dns_name : null
+  description = "ALB DNS name"
+}
+
+output "cloudfront_domain_name" {
+  value       = var.create_vpc ? aws_cloudfront_distribution.main[0].domain_name : null
+  description = "CloudFront distribution domain name"
+}
+
+output "cloudfront_distribution_id" {
+  value       = var.create_vpc ? aws_cloudfront_distribution.main[0].id : null
+  description = "CloudFront distribution ID"
 }
