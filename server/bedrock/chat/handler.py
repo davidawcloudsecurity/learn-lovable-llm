@@ -294,8 +294,10 @@ def process_chat_request(chat_request: ChatRequest) -> Response:
         response_text = chain_response["response"]
         intent = chain_response["intent"]
         sources = chain_response.get("sources")
+        input_tokens = chain_response.get("input_tokens", 0)
+        output_tokens = chain_response.get("output_tokens", 0)
 
-        logger.info(f"Generated response with intent: {intent}")
+        logger.info(f"Generated response with intent: {intent} (input: {input_tokens}, output: {output_tokens} tokens)")
         metrics.add_metric(name="MessagesProcessed", unit=MetricUnit.Count, value=1)
         metrics.add_dimension(name="intent", value=intent)
 
@@ -333,6 +335,8 @@ def process_chat_request(chat_request: ChatRequest) -> Response:
         chat_response = ChatResponse(
             session_id=session_id,
             messages=chat_messages,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
         )
 
         # Add performance metrics
