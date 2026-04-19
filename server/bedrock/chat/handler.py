@@ -40,7 +40,7 @@ metrics = Metrics(namespace="BurnerGenaiPythonLambdaKrobrian20250828")
 metrics.set_default_dimensions(service="ChatHandler")
 
 # Get environment variables
-CHAT_SESSIONS_TABLE_NAME = os.environ.get("CHAT_SESSIONS_TABLE_NAME", "BurnerGenaiPythonLambdaKrobrian20250828-ChatSessions")
+CHAT_SESSIONS_TABLE_NAME = os.environ.get("CHAT_SESSIONS_TABLE_NAME", "")
 KNOWLEDGE_BASE_ID = os.environ.get("KNOWLEDGE_BASE_ID", "FAKE-KB-ID")
 GUARDRAIL_ID = os.environ.get("GUARDRAIL_ID", "fake-guardrail-id")
 GUARDRAIL_VERSION = os.environ.get("GUARDRAIL_VERSION", "fake-guardrail-version")
