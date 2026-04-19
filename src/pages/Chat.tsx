@@ -2,7 +2,20 @@ import { useState, useRef, useEffect } from "react";
 import { Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { LearnLLMLogo } from "@/components/LearnLLMLogo";
-import { streamChatResponse, resetSession, type TokenUsage } from "@/lib/chat-api";
+import {
+  streamChatResponse,
+  resetSession,
+  setSession,
+  getSession,
+  loadSessionHistory,
+  type TokenUsage,
+} from "@/lib/chat-api";
+import {
+  loadSessions,
+  saveSession,
+  removeSession,
+  type SessionEntry,
+} from "@/lib/session-storage";
 import { tokenizeOrdered } from "@/lib/tokenizer";
 import ChatSidebar from "@/components/chat/ChatSidebar";
 import ChatEmptyState from "@/components/chat/ChatEmptyState";
@@ -20,9 +33,16 @@ const Chat = () => {
   const [inputTokens, setInputTokens] = useState<number | null>(null);
   const [outputTokens, setOutputTokens] = useState<number | null>(null);
   const [elapsedTime, setElapsedTime] = useState<number>(0);
+  const [sessions, setSessions] = useState<SessionEntry[]>([]);
+  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Load sessions from localStorage on mount
+  useEffect(() => {
+    setSessions(loadSessions());
+  }, []);
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -90,6 +110,22 @@ const Chat = () => {
       setOutputTokens(tokenUsage.output_tokens);
       setIsLoading(false);
       setElapsedTime(0);
+
+      // Persist the session to localStorage so it appears in the sidebar
+      const sid = getSession();
+      if (sid) {
+        const now = Date.now();
+        const firstUserMsg = updatedMessages.find((m) => m.role === "user");
+        const preview = firstUserMsg?.content.slice(0, 40) ?? "New chat";
+        saveSession({
+          id: sid,
+          preview,
+          createdAt: now,
+          updatedAt: now,
+        });
+        setActiveSessionId(sid);
+        setSessions(loadSessions());
+      }
       
       console.log(`Response completed in ${totalTime}s (first token: ${timeToFirstToken}s, input: ${tokenUsage.input_tokens}, output: ${tokenUsage.output_tokens} tokens)`);
     };
@@ -116,7 +152,36 @@ const Chat = () => {
     setResponseTime(null);
     setInputTokens(null);
     setOutputTokens(null);
+    setActiveSessionId(null);
     resetSession();
+  };
+
+  const handleSelectSession = async (id: string) => {
+    if (id === activeSessionId) return;
+    setIsLoading(true);
+    setError(null);
+    try {
+      const history = await loadSessionHistory(id);
+      setSession(id);
+      setMessages(history);
+      setActiveSessionId(id);
+      setResponseTime(null);
+      setInputTokens(null);
+      setOutputTokens(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load session");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleDeleteSession = (id: string) => {
+    removeSession(id);
+    setSessions(loadSessions());
+    // If the deleted one was active, reset to empty
+    if (id === activeSessionId) {
+      handleNewChat();
+    }
   };
 
   const isEmpty = messages.length === 0;
@@ -124,8 +189,11 @@ const Chat = () => {
   return (
     <div className="flex h-screen bg-background">
       <ChatSidebar
-        firstMessage={messages[0]?.content}
+        sessions={sessions}
+        activeSessionId={activeSessionId}
         onNewChat={handleNewChat}
+        onSelectSession={handleSelectSession}
+        onDeleteSession={handleDeleteSession}
       />
 
       <main className="flex-1 flex flex-col min-w-0">
