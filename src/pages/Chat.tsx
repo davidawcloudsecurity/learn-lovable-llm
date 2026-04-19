@@ -2,7 +2,8 @@ import { useState, useRef, useEffect } from "react";
 import { Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { LearnLLMLogo } from "@/components/LearnLLMLogo";
-import { streamChatResponse, resetSession } from "@/lib/chat-api";
+import { streamChatResponse, resetSession, type TokenUsage } from "@/lib/chat-api";
+import { tokenizeOrdered } from "@/lib/tokenizer";
 import ChatSidebar from "@/components/chat/ChatSidebar";
 import ChatEmptyState from "@/components/chat/ChatEmptyState";
 import ChatMessage from "@/components/chat/ChatMessage";
@@ -16,6 +17,8 @@ const Chat = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [responseTime, setResponseTime] = useState<number | null>(null);
+  const [inputTokens, setInputTokens] = useState<number | null>(null);
+  const [outputTokens, setOutputTokens] = useState<number | null>(null);
   const [elapsedTime, setElapsedTime] = useState<number>(0);
   const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -38,7 +41,13 @@ const Chat = () => {
     setIsLoading(true);
     setError(null);
     setResponseTime(null);
+    setInputTokens(null);
+    setOutputTokens(null);
     setElapsedTime(0);
+
+    // Count input tokens
+    const inTokens = tokenizeOrdered(trimmed).length;
+    setInputTokens(inTokens);
 
     const startTime = performance.now();
     let firstTokenTime: number | null = null;
@@ -65,7 +74,7 @@ const Chat = () => {
       });
     };
 
-    const onDone = () => {
+    const onDone = (tokenUsage: TokenUsage) => {
       const endTime = performance.now();
       const totalTime = ((endTime - startTime) / 1000).toFixed(2);
       const timeToFirstToken = firstTokenTime ? ((firstTokenTime - startTime) / 1000).toFixed(2) : null;
@@ -77,10 +86,12 @@ const Chat = () => {
       }
       
       setResponseTime(parseFloat(totalTime));
+      setInputTokens(tokenUsage.input_tokens);
+      setOutputTokens(tokenUsage.output_tokens);
       setIsLoading(false);
       setElapsedTime(0);
       
-      console.log(`Response completed in ${totalTime}s (first token: ${timeToFirstToken}s)`);
+      console.log(`Response completed in ${totalTime}s (first token: ${timeToFirstToken}s, input: ${tokenUsage.input_tokens}, output: ${tokenUsage.output_tokens} tokens)`);
     };
 
     const onError = (err: string) => {
@@ -103,6 +114,8 @@ const Chat = () => {
     setInput("");
     setError(null);
     setResponseTime(null);
+    setInputTokens(null);
+    setOutputTokens(null);
     resetSession();
   };
 
@@ -161,6 +174,8 @@ const Chat = () => {
           isLoading={isLoading}
           error={error}
           responseTime={responseTime}
+          inputTokens={inputTokens}
+          outputTokens={outputTokens}
           onInputChange={setInput}
           onSend={handleSend}
         />

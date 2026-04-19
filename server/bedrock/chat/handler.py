@@ -40,12 +40,12 @@ metrics = Metrics(namespace="BurnerGenaiPythonLambdaKrobrian20250828")
 metrics.set_default_dimensions(service="ChatHandler")
 
 # Get environment variables
-CHAT_SESSIONS_TABLE_NAME = os.environ.get("CHAT_SESSIONS_TABLE_NAME", "BurnerGenaiPythonLambdaKrobrian20250828-ChatSessions")
+CHAT_SESSIONS_TABLE_NAME = os.environ.get("CHAT_SESSIONS_TABLE_NAME", "")
 KNOWLEDGE_BASE_ID = os.environ.get("KNOWLEDGE_BASE_ID", "FAKE-KB-ID")
 GUARDRAIL_ID = os.environ.get("GUARDRAIL_ID", "fake-guardrail-id")
 GUARDRAIL_VERSION = os.environ.get("GUARDRAIL_VERSION", "fake-guardrail-version")
-AWS_REGION = os.environ.get("AWS_REGION", "us-west-2")
-MODEL_ID = os.environ.get("MODEL_ID", "anthropic.claude-3-5-haiku-20241022-v1:0")
+AWS_REGION = os.environ.get("AWS_REGION", "us-east-1")
+MODEL_ID = os.environ.get("MODEL_ID", "us.anthropic.claude-3-5-haiku-20241022-v1:0")
 
 # Module-level variables that can be mocked in tests
 bedrock_runtime = boto3.client("bedrock-runtime", region_name=AWS_REGION)
@@ -294,8 +294,10 @@ def process_chat_request(chat_request: ChatRequest) -> Response:
         response_text = chain_response["response"]
         intent = chain_response["intent"]
         sources = chain_response.get("sources")
+        input_tokens = chain_response.get("input_tokens", 0)
+        output_tokens = chain_response.get("output_tokens", 0)
 
-        logger.info(f"Generated response with intent: {intent}")
+        logger.info(f"Generated response with intent: {intent} (input: {input_tokens}, output: {output_tokens} tokens)")
         metrics.add_metric(name="MessagesProcessed", unit=MetricUnit.Count, value=1)
         metrics.add_dimension(name="intent", value=intent)
 
@@ -333,6 +335,8 @@ def process_chat_request(chat_request: ChatRequest) -> Response:
         chat_response = ChatResponse(
             session_id=session_id,
             messages=chat_messages,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
         )
 
         # Add performance metrics

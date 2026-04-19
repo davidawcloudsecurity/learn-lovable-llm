@@ -12,7 +12,6 @@ from langchain_aws import ChatBedrockConverse
 from langchain_core.messages import BaseMessage, HumanMessage, AIMessage
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.runnables import RunnablePassthrough
-from langchain_core.output_parsers import StrOutputParser
 from langchain_core.retrievers import BaseRetriever
 # Using DynamoDBMemoryAdapter directly instead of deprecated ConversationBufferWindowMemory
 
@@ -48,14 +47,16 @@ class ChatConversationChain:
         self.model_id = model_id or os.getenv("MODEL_ID", "anthropic.claude-3-5-haiku-20241022-v1:0")
         self.window_size = window_size
         aws_region = os.getenv("AWS_REGION", "us-east-1")        
+
+        # Build model_kwargs dynamically — some models (e.g. Nova) don't support top_p
+        model_kwargs = {"temperature": 0.0, "max_tokens": 4096}
+        if "nova" not in self.model_id.lower():
+            model_kwargs["top_p"] = 0.9
+
         self.llm = ChatBedrockConverse(
             model=model_id,
             region_name=aws_region,
-            model_kwargs={
-                "temperature": 0.0,
-                "top_p": 0.9,
-                "max_tokens": 4096,
-            },
+            model_kwargs=model_kwargs,
         )
         self.chain = self._create_chain()
 
@@ -83,7 +84,7 @@ Context:
             ]
         )
 
-        # Create the chain
+        # Create the chain — no StrOutputParser so we keep the full AIMessage with token usage
         chain = (
             {
                 "context": self.retriever | self._format_docs,
@@ -92,7 +93,6 @@ Context:
             }
             | prompt
             | self.llm
-            | StrOutputParser()
         )
 
         return chain
@@ -120,7 +120,7 @@ Context:
         """
         return "\n\n".join(doc.page_content for doc in docs)
 
-    def process_message(self, session_id: str, message: str) -> str:
+    def process_message(self, session_id: str, message: str) -> Dict[str, Any]:
         """Process a message and generate a response.
 
         Args:
@@ -128,13 +128,29 @@ Context:
             message: The message content
 
         Returns:
-            The response content
+            Dict with 'text', 'input_tokens', and 'output_tokens'
         """
         # Store session ID for use in _get_chat_history
         self._current_session_id = session_id
 
-        # Generate a response
-        response = self.chain.invoke(message)
+        # Generate a response — returns full AIMessage object
+        ai_message = self.chain.invoke(message)
 
-        logger.info(f"Generated response for session {session_id}")
-        return response
+        # Debug: log the full AIMessage to see what's available
+        logger.info(f"AIMessage type: {type(ai_message)}")
+        logger.info(f"AIMessage content: {ai_message.content[:100] if hasattr(ai_message, 'content') else 'NO CONTENT'}")
+        logger.info(f"AIMessage usage_metadata: {getattr(ai_message, 'usage_metadata', 'NOT FOUND')}")
+        logger.info(f"AIMessage response_metadata: {getattr(ai_message, 'response_metadata', 'NOT FOUND')}")
+
+        # Extract token usage from response metadata
+        # LangChain AIMessage uses usage_metadata with input_tokens/output_tokens
+        usage = getattr(ai_message, "usage_metadata", None) or {}
+        input_tokens = usage.get("input_tokens", 0)
+        output_tokens = usage.get("output_tokens", 0)
+
+        logger.info(f"Generated response for session {session_id} (input: {input_tokens}, output: {output_tokens} tokens)")
+        return {
+            "text": ai_message.content,
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+        }
