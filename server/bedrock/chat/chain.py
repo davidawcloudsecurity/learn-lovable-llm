@@ -135,7 +135,8 @@ Context:
         ai_message = self.chain.invoke(message)
 
         # Extract token usage from response metadata
-        usage = ai_message.response_metadata.get("usage", {})
+        # LangChain AIMessage uses usage_metadata with input_tokens/output_tokens
+        usage = getattr(ai_message, "usage_metadata", None) or {}
         input_tokens = usage.get("input_tokens", 0)
         output_tokens = usage.get("output_tokens", 0)
 
