@@ -66,3 +66,42 @@ export async function streamChatResponse(
     onError(error instanceof Error ? error.message : 'Unknown error');
   }
 }
+
+
+export function setSession(sessionId: string | null) {
+  currentSessionId = sessionId;
+}
+
+export function getSession(): string | null {
+  return currentSessionId;
+}
+
+/**
+ * Load all messages for an existing session from the backend.
+ */
+export async function loadSessionHistory(sessionId: string): Promise<Message[]> {
+  try {
+    const response = await fetch("/api/chat/history", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ session_id: sessionId }),
+    });
+
+    if (!response.ok) {
+      throw new Error(`Failed to load history: ${response.status}`);
+    }
+
+    const data = await response.json();
+
+    // Convert backend format (HUMAN/BOT) to UI format (user/assistant)
+    const messages: Message[] = (data.messages ?? []).map((m: any) => ({
+      role: m.message_type === "HUMAN" ? "user" : "assistant",
+      content: m.message,
+    }));
+
+    return messages;
+  } catch (error) {
+    console.error("Error loading session history:", error);
+    return [];
+  }
+}
