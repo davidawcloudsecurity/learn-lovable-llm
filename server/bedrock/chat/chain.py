@@ -134,6 +134,12 @@ Context:
         # Generate a response — returns full AIMessage object
         ai_message = self.chain.invoke(message)
 
+        # Debug: log the full AIMessage to see what's available
+        logger.info(f"AIMessage type: {type(ai_message)}")
+        logger.info(f"AIMessage content: {ai_message.content[:100] if hasattr(ai_message, 'content') else 'NO CONTENT'}")
+        logger.info(f"AIMessage usage_metadata: {getattr(ai_message, 'usage_metadata', 'NOT FOUND')}")
+        logger.info(f"AIMessage response_metadata: {getattr(ai_message, 'response_metadata', 'NOT FOUND')}")
+
         # Extract token usage from response metadata
         # LangChain AIMessage uses usage_metadata with input_tokens/output_tokens
         usage = getattr(ai_message, "usage_metadata", None) or {}
