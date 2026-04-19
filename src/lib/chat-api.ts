@@ -7,10 +7,15 @@ export function resetSession() {
   currentSessionId = null;
 }
 
+export interface TokenUsage {
+  input_tokens: number | null;
+  output_tokens: number | null;
+}
+
 export async function streamChatResponse(
   messages: Message[],
   onDelta: (text: string) => void,
-  onDone: () => void,
+  onDone: (tokenUsage: TokenUsage) => void,
   onError: (error: string) => void
 ) {
   try {
@@ -52,7 +57,10 @@ export async function streamChatResponse(
       onDelta(lastBotMessage.message);
     }
 
-    onDone();
+    onDone({
+      input_tokens: data.input_tokens ?? null,
+      output_tokens: data.output_tokens ?? null,
+    });
   } catch (error) {
     console.error('Chat API error:', error);
     onError(error instanceof Error ? error.message : 'Unknown error');
