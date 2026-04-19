@@ -1,3 +1,14 @@
+# Session Notes — LearnLLM Project
+
+## Table of Contents
+
+1. [Debugging & Deploying the Chatbot on EC2](#session-notes--debugging--deploying-the-chatbot-on-ec2) — Initial EC2 deployment, nginx/backend connectivity, IAM, DynamoDB, guardrails
+2. [Strands vs LangChain Deep Dive](#session-notes--strands-vs-langchain-deep-dive) — Comparing the three backend options, memory strategies, intent classification
+3. [Tokens, Embeddings & Vectors](#session-notes--tokens-embeddings--vectors) — Core concepts and the client-side tokenizer visualizer
+4. [Switching Backends + Real Token Counts](#session-notes--switching-backends--real-token-counts) — Moving back to LangChain backend, wiring Bedrock token usage through to UI, model compatibility, distillation
+
+---
+
 # Session Notes — Debugging & Deploying the Chatbot on EC2
 
 ## What We Started With
@@ -196,3 +207,199 @@ Nearly identical. The `server/bedrock/chat/` version adds `TokenUsage` to the re
 ## Can Strands Use DynamoDB?
 
 Yes. You'd save messages to DynamoDB before/after each agent call (outside of Strands), while keeping `SlidingWindowConversationManager` for what the LLM sees. Storage and memory strategy are independent concerns.
+
+
+---
+
+# Session Notes — Tokens, Embeddings & Vectors
+
+## The Pipeline: Text → Numbers
+
+LLMs can't read words. Everything gets converted to numbers before the model can process it. The pipeline is:
+
+```
+Text → Tokens (split + assign IDs) → Embeddings (meaningful number arrays)
+```
+
+## Tokens
+
+Tokenization is the first step. A tokenizer breaks text into smaller pieces (words, subwords, or characters) and assigns each piece a numeric ID from its vocabulary.
+
+Example: `"unhappiness"` → `["un", "happi", "ness"]` → `[432, 8821, 1057]`
+
+- Real tokenizers (tiktoken, sentencepiece) use subword tokenization (BPE — Byte Pair Encoding)
+- The tokenizer's vocabulary is literally a dict: `{"un": 432, "happi": 8821, "ness": 1057}`
+- Different models have different tokenizers and vocabularies
+
+## Embeddings
+
+Once you have token IDs, each one gets mapped to an embedding — a dense array of numbers that represents its meaning.
+
+Token ID `8821` ("happi") → `[0.12, -0.45, 0.78, 0.33, ...]` (hundreds or thousands of dimensions)
+
+- Similar meanings end up close together in this number space ("king" and "queen" are near each other)
+- Embeddings are learned during training — the model figures out what numbers best capture meaning
+- Not unique to LLMs — embeddings are used across ML for text, images, audio, etc.
+
+## Vectors
+
+A vector is just the math term for an ordered array of numbers: `[0.12, -0.45, 0.78, 0.33, ...]`
+
+- An embedding IS a vector — "embedding" = the learned representation, "vector" = the data structure it lives in
+- Think Python `list[float]` or a NumPy array, NOT a dict
+- Vectors have direction and magnitude in high-dimensional space
+- Similarity between vectors is measured using cosine similarity or Euclidean distance
+
+## Analogy
+
+- Tokens = breaking a sentence into puzzle pieces and labeling each piece with a number
+- Embeddings = giving each piece a GPS coordinate in "meaning space"
+- Vectors = the GPS coordinate format itself (a list of numbers)
+
+## What We Built
+
+Added a client-side token visualizer to the chat UI:
+
+- Created `src/lib/tokenizer.ts` — simple word-level tokenizer that hashes words to consistent numeric IDs (0–50000 range)
+- Updated `src/components/chat/ChatMessage.tsx` — each user message now has a collapsible "Show tokens" toggle
+- Clicking it reveals a dict-style view: `{ "hello": 26544, "world": 4891 }`
+- This is a simplified word-level tokenizer for learning purposes — real LLM tokenizers use subword tokenization (BPE)
+
+### Files Changed
+- `src/lib/tokenizer.ts` (new)
+- `src/components/chat/ChatMessage.tsx` (modified)
+
+
+---
+
+# Session Notes — Switching Backends + Real Token Counts
+
+## Goal
+
+Switch EC2 deployment from Strands back to the LangChain/FastAPI backend (`server/bedrock/`) — the one the frontend was actually built for — and wire real Bedrock token counts through to the UI.
+
+## Issues Hit Along the Way
+
+### 1. `BotocoreConfig` Import Error (Strands backend)
+- `app.py` had `from botocore.config import BotocoreConfig` — wrong class name
+- Actual class is just `Config`, not `BotocoreConfig`
+- Fix: `from botocore.config import Config as BotocoreConfig`
+
+### 2. Hardcoded Fallback Table Name
+- `handler.py` had `os.environ.get("CHAT_SESSIONS_TABLE_NAME", "BurnerGenaiPythonLambdaKrobrian20250828-ChatSessions")`
+- Also had `AWS_REGION` default of `us-west-2`
+- Even after the `.env` fix, these baked-in defaults caused wrong-region/wrong-table errors if the env vars didn't load
+- Fix: updated defaults to `demo-project-ChatSessions` and `us-east-1`
+
+### 3. `.env` Heredoc Indentation
+- In `main.tf` user_data, the inner `<<ENVFILE` heredoc had leading spaces
+- Python `dotenv` can't parse `              KEY=value` lines — whitespace breaks it
+- Outer `<<-EOF` strips tabs but not the inner heredoc's content
+- Fix: left-align the inner heredoc lines so `.env` has clean `KEY=value` entries
+
+### 4. `load_dotenv()` After Imports
+- Same bug as session 1 — `index.py` imported `chat.handler` BEFORE calling `load_dotenv()`
+- `handler.py` reads env vars at module import time, so they were empty when loaded
+- Fix: move `load_dotenv()` ABOVE the chat module imports
+
+### 5. Overly Narrow DynamoDB IAM Policy
+- Policy was scoped to the exact Terraform table ARN
+- Fallback code used a different table name → `AccessDeniedException`
+- Fix: widened to `arn:aws:dynamodb:*:*:table/*` (fine for a lab, too broad for prod)
+
+### 6. `top_p` Not Supported by All Models
+- `chain.py` and `hybrid_chain.py` passed `top_p: 0.9` to `ChatBedrockConverse`
+- Amazon Nova models reject `top_p` with `ValidationException: extraneous key [top_p] is not permitted`
+- Fix: conditionally include `top_p` only when model ID doesn't contain "nova"
+
+## Real Token Counts — The Refactor
+
+### The Problem
+- Backend used `StrOutputParser()` at end of the LangChain chain, which discards the full `AIMessage` and keeps only the string
+- The `usage_metadata` attribute (with `input_tokens` / `output_tokens`) was being thrown away
+
+### The Fix — Full Pipeline
+1. **`chain.py`**: removed `StrOutputParser()`, `process_message()` now returns `{"text", "input_tokens", "output_tokens"}`
+2. **`hybrid_chain.py`**: passes token counts through from chain to handler
+3. **`models.py`**: added `input_tokens` / `output_tokens` fields to `ChatResponse`
+4. **`handler.py`**: includes token counts in the response
+5. **`chat-api.ts`**: reads token counts from JSON response, passes to `onDone` callback
+6. **`Chat.tsx`**: stores token counts in state, passes to `ChatInput`
+7. **`ChatInput.tsx`**: displays `⚡ 2.52s  📥 Input: 66 tokens  📤 Output: 12 tokens`
+
+### Key Discovery — `usage_metadata` vs `response_metadata`
+LangChain's `AIMessage` has TWO metadata attributes:
+- `response_metadata` — raw provider response (ResponseMetadata, stopReason, etc.) — NO tokens here
+- `usage_metadata` — standardized token info `{input_tokens, output_tokens, total_tokens}`
+
+Initial attempt used `response_metadata.usage` which didn't exist. Debug logging revealed `usage_metadata` as the right attribute.
+
+## Concepts Discussed
+
+### Tokens — Real vs Ours
+- Our `tokenizer.ts` is a learning tool — simple word hash to 0–50000 range
+- Real LLM tokenizers use BPE/subword — "unhappiness" → `["un", "happi", "ness"]`
+- Each model has its own tokenizer; same text tokenizes differently across models
+
+### Can You See What Tokens Claude Uses?
+- **No.** Bedrock tells you the count (e.g., "12 tokens") but not the breakdown
+- Anthropic hasn't published Claude's tokenizer
+- For exact splits, you'd need an open model: Llama, Mistral, or anything from HuggingFace where the tokenizer is public
+
+### Tokenizer Visibility by Model
+- **OpenAI (GPT-4, etc.)** — `tiktoken` is public, exact splits available
+- **Llama / Mistral / open-source** — SentencePiece tokenizer downloadable
+- **Claude (Anthropic)** — closed, count only
+- **Amazon Nova** — closed, count only
+
+### Distillation
+- Does NOT require access to the teacher's tokens or embeddings
+- Student model learns from (prompt, teacher's response text) pairs
+- Student uses its own tokenizer — totally independent
+- Bedrock Model Distillation handles this as a managed service
+- Advanced techniques (logit distillation, soft labels) need model internals but aren't available for closed models
+
+## Restart/Rebuild Commands
+
+### Backend EC2 (FastAPI + pm2)
+```bash
+cd /opt/app
+sudo git pull
+sudo PM2_HOME=/etc/.pm2 pm2 restart bedrock-api
+sudo PM2_HOME=/etc/.pm2 pm2 logs bedrock-api --lines 30
+```
+
+### Frontend EC2 (React + nginx)
+```bash
+cd /opt/app
+sudo git pull
+sudo npm run build
+sudo systemctl restart nginx
+```
+Static files live in `/opt/app/dist` — nginx serves those directly, no process to restart for code changes. `npm run build` compiles TS/React into the bundle.
+
+### PM2 Quirk — `PM2_HOME`
+- pm2 stores config in `~/.pm2` by default (per-user)
+- user_data runs as root → saves to `/root/.pm2`
+- SSM session runs as different user → looks at wrong folder → "no processes"
+- Fix: always run with `sudo PM2_HOME=/etc/.pm2 pm2 ...` so everyone sees the same process list
+
+## Non-Fatal Errors You'll Still See
+
+These don't block responses, logged for transparency:
+
+- **Retriever 404** — no Knowledge Base configured (`KNOWLEDGE_BASE_ID` empty). The retriever returns empty docs, LLM answers without context. Expected.
+- **Guardrails `KeyError: 'action'`** — `GUARDRAIL_ID=fake-guardrail-id` triggers the skip check, but the fake response doesn't have the expected `action` key. Error caught, flow continues.
+
+## Files Changed This Session
+
+- `server/bedrock/index.py` — moved `load_dotenv()` before chat imports, `reload=False`
+- `server/bedrock/chat/handler.py` — updated default table/region/model
+- `server/bedrock/chat/chain.py` — removed `StrOutputParser`, returns dict with token usage, conditional `top_p`
+- `server/bedrock/chat/hybrid_chain.py` — passes token usage through, conditional `top_p`
+- `server/bedrock/chat/models.py` — added token fields to `ChatResponse`
+- `server/strands/bedrock/app.py` — fixed `BotocoreConfig` import
+- `infra_terraform/main.tf` — switched user_data to bedrock backend, broadened DynamoDB IAM, inline `.env` creation
+- `src/lib/chat-api.ts` — reads token counts from response, new `TokenUsage` type
+- `src/pages/Chat.tsx` — token state, passes to `ChatInput`
+- `src/components/chat/ChatInput.tsx` — displays input/output token counts alongside response time
