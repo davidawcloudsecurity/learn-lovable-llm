@@ -108,35 +108,39 @@ class HybridConversationChain:
             # Step 2: Route message based on intent
             if intent == "QUERY":
                 logger.info(f"Routing to RAG chain for session {session_id}")
-                response = self.rag_chain.process_message(session_id, message)
+                result = self.rag_chain.process_message(session_id, message)
                 
-                # For QUERY intent, include empty sources list (will be populated in future tasks)
                 return {
-                    "response": response,
+                    "response": result["text"],
                     "intent": intent,
-                    "sources": []  # Empty list for now, will be populated with actual sources later
+                    "sources": [],
+                    "input_tokens": result.get("input_tokens", 0),
+                    "output_tokens": result.get("output_tokens", 0),
                 }
             
             elif intent == "CHAT":
                 logger.info(f"Routing to conversation chain for session {session_id}")
-                response = self.conversation_chain.process_message(session_id, message)
+                result = self.conversation_chain.process_message(session_id, message)
                 
-                # For CHAT intent, sources should be None
                 return {
-                    "response": response,
+                    "response": result["text"],
                     "intent": intent,
-                    "sources": None
+                    "sources": None,
+                    "input_tokens": result.get("input_tokens", 0),
+                    "output_tokens": result.get("output_tokens", 0),
                 }
             
             else:
                 # Handle unexpected intent (should not happen with proper classifier)
                 logger.warning(f"Unknown intent '{intent}', defaulting to QUERY")
-                response = self.rag_chain.process_message(session_id, message)
+                result = self.rag_chain.process_message(session_id, message)
                 
                 return {
-                    "response": response,
-                    "intent": "QUERY",  # Default to QUERY for safety
-                    "sources": []
+                    "response": result["text"],
+                    "intent": "QUERY",
+                    "sources": [],
+                    "input_tokens": result.get("input_tokens", 0),
+                    "output_tokens": result.get("output_tokens", 0),
                 }
                 
         except Exception as e:
@@ -146,12 +150,14 @@ class HybridConversationChain:
             # This provides a fallback in case of errors
             try:
                 logger.info(f"Falling back to conversation chain for session {session_id}")
-                response = self.conversation_chain.process_message(session_id, message)
+                result = self.conversation_chain.process_message(session_id, message)
                 
                 return {
-                    "response": response,
-                    "intent": "CHAT",  # Default to CHAT for fallback
-                    "sources": None
+                    "response": result["text"],
+                    "intent": "CHAT",
+                    "sources": None,
+                    "input_tokens": result.get("input_tokens", 0),
+                    "output_tokens": result.get("output_tokens", 0),
                 }
             except Exception as fallback_error:
                 logger.error(f"Fallback processing also failed for session {session_id}: {str(fallback_error)}", exc_info=True)
