@@ -44,8 +44,8 @@ CHAT_SESSIONS_TABLE_NAME = os.environ.get("CHAT_SESSIONS_TABLE_NAME", "BurnerGen
 KNOWLEDGE_BASE_ID = os.environ.get("KNOWLEDGE_BASE_ID", "FAKE-KB-ID")
 GUARDRAIL_ID = os.environ.get("GUARDRAIL_ID", "fake-guardrail-id")
 GUARDRAIL_VERSION = os.environ.get("GUARDRAIL_VERSION", "fake-guardrail-version")
-AWS_REGION = os.environ.get("AWS_REGION", "us-west-2")
-MODEL_ID = os.environ.get("MODEL_ID", "anthropic.claude-3-5-haiku-20241022-v1:0")
+AWS_REGION = os.environ.get("AWS_REGION", "us-east-1")
+MODEL_ID = os.environ.get("MODEL_ID", "us.anthropic.claude-3-5-haiku-20241022-v1:0")
 
 # Module-level variables that can be mocked in tests
 bedrock_runtime = boto3.client("bedrock-runtime", region_name=AWS_REGION)
