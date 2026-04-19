@@ -12,7 +12,6 @@ from langchain_aws import ChatBedrockConverse
 from langchain_core.messages import BaseMessage, HumanMessage, AIMessage
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.runnables import RunnablePassthrough
-from langchain_core.output_parsers import StrOutputParser
 from langchain_core.retrievers import BaseRetriever
 # Using DynamoDBMemoryAdapter directly instead of deprecated ConversationBufferWindowMemory
 
@@ -83,7 +82,7 @@ Context:
             ]
         )
 
-        # Create the chain
+        # Create the chain — no StrOutputParser so we keep the full AIMessage with token usage
         chain = (
             {
                 "context": self.retriever | self._format_docs,
@@ -92,7 +91,6 @@ Context:
             }
             | prompt
             | self.llm
-            | StrOutputParser()
         )
 
         return chain
@@ -120,7 +118,7 @@ Context:
         """
         return "\n\n".join(doc.page_content for doc in docs)
 
-    def process_message(self, session_id: str, message: str) -> str:
+    def process_message(self, session_id: str, message: str) -> Dict[str, Any]:
         """Process a message and generate a response.
 
         Args:
@@ -128,13 +126,22 @@ Context:
             message: The message content
 
         Returns:
-            The response content
+            Dict with 'text', 'input_tokens', and 'output_tokens'
         """
         # Store session ID for use in _get_chat_history
         self._current_session_id = session_id
 
-        # Generate a response
-        response = self.chain.invoke(message)
+        # Generate a response — returns full AIMessage object
+        ai_message = self.chain.invoke(message)
 
-        logger.info(f"Generated response for session {session_id}")
-        return response
+        # Extract token usage from response metadata
+        usage = ai_message.response_metadata.get("usage", {})
+        input_tokens = usage.get("input_tokens", 0)
+        output_tokens = usage.get("output_tokens", 0)
+
+        logger.info(f"Generated response for session {session_id} (input: {input_tokens}, output: {output_tokens} tokens)")
+        return {
+            "text": ai_message.content,
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+        }
