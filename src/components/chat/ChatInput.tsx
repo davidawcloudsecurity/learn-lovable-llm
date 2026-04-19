@@ -9,6 +9,8 @@ interface ChatInputProps {
   isLoading: boolean;
   error: string | null;
   responseTime: number | null;
+  inputTokens: number | null;
+  outputTokens: number | null;
   onInputChange: (value: string) => void;
   onSend: () => void;
 }
@@ -18,6 +20,8 @@ const ChatInput = ({
   isLoading,
   error,
   responseTime,
+  inputTokens,
+  outputTokens,
   onInputChange,
   onSend,
 }: ChatInputProps) => {
@@ -43,8 +47,14 @@ const ChatInput = ({
         </div>
       )}
       {responseTime !== null && !isLoading && (
-        <div className="max-w-3xl mx-auto mb-2 px-3 py-1 text-xs text-muted-foreground text-center">
-          ⚡ Response time: {responseTime}s
+        <div className="max-w-3xl mx-auto mb-2 px-3 py-1 text-xs text-muted-foreground text-center flex items-center justify-center gap-3">
+          <span>⚡ {responseTime}s</span>
+          {inputTokens !== null && (
+            <span>📥 Input: {inputTokens} tokens</span>
+          )}
+          {outputTokens !== null && (
+            <span>📤 Output: {outputTokens} tokens</span>
+          )}
         </div>
       )}
       {isLoading && (
