@@ -330,14 +330,14 @@ resource "aws_instance" "backend" {
               apt update
               apt install -y git curl python3 python3-pip python3-venv
               
-              # Install Node.js
-              curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash - # remove because use python
-              apt install -y nodejs # this is for pm2
+              # Install Node.js (needed for pm2)
+              curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+              apt install -y nodejs
               
               # Clone repository
               cd /opt
               git clone -b aws/main/strands/rag https://github.com/davidawcloudsecurity/learn-lovable-llm.git app
-              cd app/server/strands/bedrock
+              cd app/server/bedrock
               
               # Create Python virtual environment
               python3 -m venv venv
@@ -346,14 +346,26 @@ resource "aws_instance" "backend" {
               # Install Python dependencies
               pip install --upgrade pip
               pip install -r requirements.txt
-                                        
+              
+              # Create .env file
+              cat > .env <<ENVFILE
+              PORT=8000
+              AWS_REGION=us-east-1
+              AWS_DEFAULT_REGION=us-east-1
+              MODEL_ID=amazon.nova-pro-v1:0
+              CHAT_SESSIONS_TABLE_NAME=${aws_dynamodb_table.chat_sessions.name}
+              KNOWLEDGE_BASE_ID=
+              GUARDRAIL_ID=fake-guardrail-id
+              GUARDRAIL_VERSION=
+              ENVFILE
+              
               # Install PM2 globally
               npm install -g pm2
               
-              # Start the Flask server with PM2
-              pm2 start app.py --name strands-api --interpreter venv/bin/python3
-              pm2 save
-              pm2 startup systemd -u root --hp /root
+              # Start the FastAPI server with PM2
+              PM2_HOME=/etc/.pm2 pm2 start index.py --name bedrock-api --interpreter /opt/app/server/bedrock/venv/bin/python3
+              PM2_HOME=/etc/.pm2 pm2 save
+              PM2_HOME=/etc/.pm2 pm2 startup systemd -u root --hp /root
               EOF
 
   tags = {
