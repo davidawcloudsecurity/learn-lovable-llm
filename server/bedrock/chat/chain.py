@@ -46,18 +46,22 @@ class ChatConversationChain:
         self.retriever = retriever
         self.model_id = model_id or os.getenv("MODEL_ID", "anthropic.claude-3-5-haiku-20241022-v1:0")
         self.window_size = window_size
-        aws_region = os.getenv("AWS_REGION", "us-east-1")        
+        aws_region = os.getenv("AWS_REGION", "us-east-1")
 
-        # Build model_kwargs dynamically — some models (e.g. Nova) don't support top_p
-        model_kwargs = {"temperature": 0.0, "max_tokens": 4096}
+        # ChatBedrockConverse takes max_tokens/temperature/top_p as top-level kwargs.
+        # Anything stuffed into model_kwargs is forwarded as additionalModelRequestFields,
+        # which Bedrock rejects with "extraneous key [max_tokens] is not permitted".
+        converse_kwargs: Dict[str, Any] = {
+            "model": self.model_id,
+            "region_name": aws_region,
+            "temperature": 0.0,
+            "max_tokens": 4096,
+        }
+        # Some models (e.g. Amazon Nova) reject top_p
         if "nova" not in self.model_id.lower():
-            model_kwargs["top_p"] = 0.9
+            converse_kwargs["top_p"] = 0.9
 
-        self.llm = ChatBedrockConverse(
-            model=model_id,
-            region_name=aws_region,
-            model_kwargs=model_kwargs,
-        )
+        self.llm = ChatBedrockConverse(**converse_kwargs)
         self.chain = self._create_chain()
 
     def _create_chain(self):
