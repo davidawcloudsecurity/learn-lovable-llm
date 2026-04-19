@@ -924,3 +924,192 @@ For the current chatbot project, DynamoDB stays for chat session storage (not ve
 - **MemoryDB** = in-memory speed (caching)
 - **Neptune Analytics** = graph-native
 - **DynamoDB** = NOT a vector store — use zero-ETL to OpenSearch if your source data lives there
+
+
+---
+
+# Session Notes — Scaling Plan, Tech Debt & The `max_tokens` Bug
+
+## What We Set Out To Do
+
+"Scale for a million users." Started as an architecture conversation, turned into a tech-debt inventory, then surfaced a real production bug while poking around.
+
+## Scaling Architecture Discussion
+
+Walked through what it actually takes to go from "single EC2 + single EC2" to ~1M MAU.
+
+### The Math That Drives Everything
+
+- 1M MAU → ~100k DAU → ~50k peak-hour users
+- ~5–15 messages/user/day → peak ~500–1,500 req/s for chat
+- Each request is 2–15s end-to-end (LLM latency dominates)
+- Little's Law: 1,000 rps × 5s = **~5,000 concurrent in-flight LLM calls**
+
+That concurrency number is what drives every decision. A single `t3.medium` handles ~100–300 concurrent long-lived requests. You need 2 orders of magnitude more headroom, and the LLM itself becomes the real bottleneck — not Python.
+
+### Target Architecture
+
+```
+CloudFront → S3 (SPA)
+           → API GW + WAF → ALB → ECS Fargate (20–200 tasks)
+                                     ├── ElastiCache Redis
+                                     ├── DynamoDB (TTL + autoscaling)
+                                     ├── Bedrock (tiered: Nova/Haiku default, Sonnet escalation)
+                                     ├── Bedrock KB (+ semantic cache)
+                                     └── SQS for async work
+           Cognito/JWT authorizer on API GW
+```
+
+### The Non-Negotiables Before Anything Else
+
+1. **Async Bedrock calls** — `ChatBedrockConverse.invoke()` blocks the FastAPI event loop. Needs `.astream` / `.ainvoke` or `asyncio.to_thread` with a bounded semaphore.
+2. **Stream to the client** — frontend does `await response.json()`. That's ~3–5x worse perceived latency than SSE. The ollama variant already shows the pattern.
+3. **Bedrock quotas are the real ceiling** — on-demand TPM/RPM is capped per account-region. At 1M users, Provisioned Throughput for baseline + cross-region inference (`us.anthropic.*` model IDs) to spread load.
+
+## Tech Debt Inventory — `tech-debts.md`
+
+Created `learn-lovable-llm/tech-debts.md` with 40 items grouped by area:
+
+- Compute & Deployment (single EC2, public subnet, EC2-served frontend, pm2)
+- Backend runtime (sync Bedrock, no streaming, boto3 defaults, module-level chain, intent classifier round-trip)
+- Data layer (full history per request, no TTL, no `user_id`, broad IAM)
+- Caching (missing entirely — no Redis, no semantic/prompt cache)
+- Auth & multi-tenancy (no auth, no rate limiting, no message size cap)
+- Frontend (localStorage-only sessions, module-level session ID, no retries)
+- LLM cost & throughput (single model for all intents, on-demand only)
+- Observability (no tracing, logs on local disk)
+- Infrastructure (no health check path, `.env` baked into user_data, no WAF, single region)
+
+Each item has a file reference and a concrete fix. Ended with a prioritized 7-step rollout order:
+
+1. Streaming + async Bedrock — biggest UX win, no infra rewrite
+2. boto3 retry/pool config — one-line changes, real impact
+3. Redis session cache + per-user rate limiting
+4. Fargate + ALB + autoscaling
+5. Cognito auth + `user_id` in DynamoDB schema
+6. Semantic + prompt caching, model tiering
+7. Observability end-to-end
+
+## Bug We Actually Hit — `extraneous key [max_tokens] is not permitted`
+
+While discussing scaling, pm2 logs surfaced a `ValidationException` on every chat request.
+
+### The Error
+
+```
+botocore.errorfactory.ValidationException: An error occurred (ValidationException)
+when calling the Converse operation: The model returned the following errors:
+Malformed input request: #: extraneous key [max_tokens] is not permitted
+```
+
+### Root Cause
+
+Same shape of bug as the earlier Nova `top_p` issue, but for a different reason.
+
+`ChatBedrockConverse` (Converse API) expects `max_tokens`, `temperature`, `top_p` as **top-level kwargs**. When you pass them inside `model_kwargs`, the library forwards them into the Converse request's `additionalModelRequestFields`, which Bedrock rejects — for every model, not just Nova.
+
+The previous session left both `chain.py` and `hybrid_chain.py` using `model_kwargs`. It had been working when we used `ChatBedrock` (legacy Invoke API), broke silently when we switched to `ChatBedrockConverse`.
+
+### The Fix
+
+**`chat/chain.py`** — hoist params out of `model_kwargs` into top-level args:
+
+```python
+converse_kwargs = {
+    "model": self.model_id,
+    "region_name": aws_region,
+    "temperature": 0.0,
+    "max_tokens": 4096,
+}
+if "nova" not in self.model_id.lower():
+    converse_kwargs["top_p"] = 0.9
+
+self.llm = ChatBedrockConverse(**converse_kwargs)
+```
+
+Also fixed a latent bug: `model=model_id` (raw arg, could be `None`) → `model=self.model_id` (resolved).
+
+**`chat/hybrid_chain.py`** — same fix, switched from `ChatBedrock` to `ChatBedrockConverse` to stay consistent with the rest of the pipeline. Classifier only needs short outputs so capped at 512 tokens.
+
+### Two Separate Restrictions That Are Easy To Confuse
+
+| Restriction | About | Affects |
+|---|---|---|
+| `top_p` — skip for Nova | Which model | Nova only |
+| `max_tokens` — top-level, not in `model_kwargs` | How you pass the arg | **Every model** via `ChatBedrockConverse` |
+
+The Nova `top_p` check was a model capability issue. The `max_tokens` issue was a LangChain API issue — would've hit Nova too if we hadn't caught it.
+
+### Switching to Nova Still Just Works
+
+One line in `.env`:
+```
+MODEL_ID=us.amazon.nova-lite-v1:0
+```
+The `"nova" not in ...` guard handles the `top_p` difference automatically. No code change needed.
+
+## Claude Identity Leak
+
+After the fix, we sent "who are you" and got back:
+
+> "I am an AI assistant created by Anthropic to be helpful, honest, and harmless..."
+
+That's Claude's default persona bleeding through because our system prompt in `chain.py` doesn't override it. The prompt just tells the model to "answer questions based on the provided context" — says nothing about identity.
+
+Fix (not applied yet, noted for later): tighten the system prompt to give the bot a name and explicitly forbid mentioning Anthropic/Claude. Same approach would work for Nova ("I'm Amazon Nova…").
+
+## Tokens vs Words — The Output Size Confusion
+
+User asked: "why does the output say 79 tokens when the response is way longer than 79 of anything?"
+
+Answer: **tokens ≠ words**.
+
+### The Rules of Thumb (English, Claude/GPT tokenizers)
+
+| Unit | Roughly |
+|---|---|
+| 1 token | ~4 characters |
+| 1 token | ~0.75 words |
+| 100 tokens | ~75 words |
+| 1,000 tokens | ~750 words (~1.5 pages) |
+
+The 63-word, 323-character response from Claude came out to ~79 tokens. Math checks.
+
+### Why A Token Isn't A Word
+
+BPE (Byte Pair Encoding) tokenizers split on subword pieces, and **spaces and punctuation count**:
+
+- "harmless" → `["harm", "less"]` (2 tokens)
+- "I won't" → `["I", " won", "'t"]` (3 tokens, leading space included)
+- "Anthropic" → maybe `["Anth", "ropic"]` (2 tokens)
+- Each of `.` `,` `-` is its own token
+
+Short common words are 1 token. Rare/long words split into multiple. A leading space usually rides with the next token.
+
+### Why Input Can Be 70+ Tokens For A 5-Word Question
+
+Input token count includes:
+- The user message
+- The full system prompt (~60 tokens in our `chain.py`)
+- Any retrieved KB context (for QUERY intent)
+- Conversation history within the 15-message window
+
+So "hello" alone reports 70+ input tokens because the system prompt is always there.
+
+### Our Client-Side Tokenizer vs Bedrock's Count
+
+`src/lib/tokenizer.ts` is word-level — splits on whitespace. It'll report "8 tokens" for the same response Bedrock calls 79 tokens. They don't match and won't match. Ours is a teaching visualizer, Bedrock's is the real Claude count from `usage_metadata`. Both are "right" within their own rules.
+
+For gut-checking real token counts: [OpenAI's tokenizer viewer](https://platform.openai.com/tokenizer). Not identical to Claude's tokenizer but close enough to build intuition.
+
+## Files Changed This Session
+
+- `server/bedrock/chat/chain.py` — `ChatBedrockConverse` top-level params, fixed `model=model_id` → `model=self.model_id`
+- `server/bedrock/chat/hybrid_chain.py` — switched classifier LLM from `ChatBedrock` to `ChatBedrockConverse`, top-level params, `max_tokens=512`
+- `tech-debts.md` (new) — 40-item tech debt inventory with fixes + prioritized rollout
+
+## Still Open / Tomorrow
+
+- Tighten the system prompt so the bot has a name and doesn't identify as Anthropic/Claude
+- Start on tech-debt item #5/#6: async Bedrock + streaming SSE end-to-end
+- After that: boto3 retry config (#7) as the quickest follow-up win
