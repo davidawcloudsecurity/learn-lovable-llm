@@ -6,6 +6,7 @@
 2. [Strands vs LangChain Deep Dive](#session-notes--strands-vs-langchain-deep-dive) — Comparing the three backend options, memory strategies, intent classification
 3. [Tokens, Embeddings & Vectors](#session-notes--tokens-embeddings--vectors) — Core concepts and the client-side tokenizer visualizer
 4. [Switching Backends + Real Token Counts](#session-notes--switching-backends--real-token-counts) — Moving back to LangChain backend, wiring Bedrock token usage through to UI, model compatibility, distillation
+5. [Parsing, Chunking & Indexing for RAG](#session-notes--parsing-chunking--indexing-for-rag) — How documents become searchable knowledge, with Python type analogies
 
 ---
 
@@ -221,40 +222,108 @@ LLMs can't read words. Everything gets converted to numbers before the model can
 Text → Tokens (split + assign IDs) → Embeddings (meaningful number arrays)
 ```
 
-## Tokens
+## Think in Python Types
 
-Tokenization is the first step. A tokenizer breaks text into smaller pieces (words, subwords, or characters) and assigns each piece a numeric ID from its vocabulary.
+If you know Python, here's the mental model:
 
-Example: `"unhappiness"` → `["un", "happi", "ness"]` → `[432, 8821, 1057]`
+| Concept | Python type | Example |
+|---|---|---|
+| Tokenizer's vocabulary | `dict[str, int]` | `{"hello": 3217, "world": 4891}` |
+| Token IDs for a sentence | `list[int]` | `[3217, 4891, 318]` |
+| One embedding | `list[float]` | `[0.12, -0.45, 0.78, ...]` |
+| A float in the embedding | `float` | `0.12` |
+| Many embeddings | `list[list[float]]` | `[[0.12, ...], [0.45, ...], ...]` |
+
+Everything you see in LLM internals reduces to these basic Python types.
+
+## Tokens — `dict[str, int]` for lookup, `list[int]` for a sentence
+
+Tokenization is the first step. A tokenizer breaks text into smaller pieces and assigns each piece a numeric ID from its vocabulary.
+
+```python
+# The tokenizer's vocabulary — a dict mapping pieces to IDs
+vocab: dict[str, int] = {
+    "un": 432,
+    "happi": 8821,
+    "ness": 1057,
+    "hello": 3217,
+    "world": 4891,
+}
+
+# Tokenizing a sentence produces a list of IDs
+tokens: list[int] = [3217, 4891]   # "hello world" → these IDs
+```
 
 - Real tokenizers (tiktoken, sentencepiece) use subword tokenization (BPE — Byte Pair Encoding)
-- The tokenizer's vocabulary is literally a dict: `{"un": 432, "happi": 8821, "ness": 1057}`
-- Different models have different tokenizers and vocabularies
+- The vocabulary is literally a `dict` that ships as a file with the model
+- Different models have different vocabularies
 
-## Embeddings
+## Embeddings — `list[float]` with meaning
 
-Once you have token IDs, each one gets mapped to an embedding — a dense array of numbers that represents its meaning.
+Once you have token IDs, each one gets mapped to an embedding — a dense array of floats that represents its meaning.
 
-Token ID `8821` ("happi") → `[0.12, -0.45, 0.78, 0.33, ...]` (hundreds or thousands of dimensions)
+```python
+# One embedding = a list of floats (typically 768, 1024, or 1536 numbers long)
+embedding: list[float] = [0.12, -0.45, 0.78, 0.33, -0.01, 0.56, ...]
 
-- Similar meanings end up close together in this number space ("king" and "queen" are near each other)
-- Embeddings are learned during training — the model figures out what numbers best capture meaning
-- Not unique to LLMs — embeddings are used across ML for text, images, audio, etc.
+# The full embedding table is a dict of token ID → embedding
+embedding_table: dict[int, list[float]] = {
+    3217: [0.12, -0.45, 0.78, ...],   # "hello"
+    4891: [0.08, -0.52, 0.81, ...],   # "world"  (note: similar to "hello")
+    1999: [0.91,  0.33, -0.22, ...],  # "banana" (very different)
+}
+```
 
-## Vectors
+- Similar meanings have similar embeddings (close together in number space)
+- Embeddings are learned during model training
+- Not unique to LLMs — used across ML for text, images, audio
+- "King" and "Queen" have embeddings that are near each other; "King" and "Banana" are far apart
 
-A vector is just the math term for an ordered array of numbers: `[0.12, -0.45, 0.78, 0.33, ...]`
+## Vectors — the Python type `list[float]`
 
-- An embedding IS a vector — "embedding" = the learned representation, "vector" = the data structure it lives in
-- Think Python `list[float]` or a NumPy array, NOT a dict
-- Vectors have direction and magnitude in high-dimensional space
-- Similarity between vectors is measured using cosine similarity or Euclidean distance
+A vector is just the math term for the `list[float]`. That's it.
+
+```python
+# These are all the same thing, just different names:
+vector   : list[float] = [0.12, -0.45, 0.78]
+embedding: list[float] = [0.12, -0.45, 0.78]
+array    : list[float] = [0.12, -0.45, 0.78]
+
+# In production code you'd use NumPy for speed:
+import numpy as np
+vector = np.array([0.12, -0.45, 0.78])
+```
+
+- "Embedding" = the **learned meaning**, "vector" = the **data structure** it lives in
+- An embedding IS a vector. Same object, different emphasis.
+- NOT a `dict` — it's ordered, indexed by position, fixed length
+
+### Similarity — how we compare vectors
+
+```python
+from math import sqrt
+
+def cosine_similarity(a: list[float], b: list[float]) -> float:
+    dot = sum(x * y for x, y in zip(a, b))
+    mag_a = sqrt(sum(x * x for x in a))
+    mag_b = sqrt(sum(x * x for x in b))
+    return dot / (mag_a * mag_b)
+
+king   = [0.12, 0.45, -0.33]
+queen  = [0.15, 0.42, -0.31]   # close to king
+banana = [0.91, -0.02, 0.77]   # far from king
+
+cosine_similarity(king, queen)   # ≈ 0.99 (very similar)
+cosine_similarity(king, banana)  # ≈ 0.12 (very different)
+```
+
+This is how RAG systems find "relevant" chunks — they embed your question and each document chunk, then pick the chunks with the highest cosine similarity.
 
 ## Analogy
 
-- Tokens = breaking a sentence into puzzle pieces and labeling each piece with a number
-- Embeddings = giving each piece a GPS coordinate in "meaning space"
-- Vectors = the GPS coordinate format itself (a list of numbers)
+- **Tokens** = breaking a sentence into puzzle pieces and labeling each piece with a number (a `dict[str, int]` lookup)
+- **Embeddings** = giving each piece a GPS coordinate in "meaning space" (a `list[float]` per token)
+- **Vectors** = the GPS coordinate format itself (just a `list[float]`)
 
 ## What We Built
 
@@ -403,3 +472,178 @@ These don't block responses, logged for transparency:
 - `src/lib/chat-api.ts` — reads token counts from response, new `TokenUsage` type
 - `src/pages/Chat.tsx` — token state, passes to `ChatInput`
 - `src/components/chat/ChatInput.tsx` — displays input/output token counts alongside response time
+
+
+---
+
+# Session Notes — Parsing, Chunking & Indexing for RAG
+
+## The Big Picture
+
+RAG (Retrieval-Augmented Generation) needs a searchable knowledge base. You can't just shove a 500-page PDF at an LLM. Documents go through three stages before they're usable:
+
+```
+Raw Document → [Parsing] → [Chunking] → [Indexing] → Searchable Knowledge Base
+```
+
+Each stage has a Python-typed output:
+
+| Stage | Input | Output | Python type |
+|---|---|---|---|
+| Parsing | PDF/HTML/DOCX bytes | Plain text | `str` |
+| Chunking | Long text | List of smaller text pieces | `list[str]` |
+| Indexing | Chunks | Chunks paired with embeddings | `list[dict]` with `list[float]` inside |
+
+## 1. Parsing — `bytes` → `str`
+
+Parsing turns messy file formats into plain text the system can work with.
+
+```python
+# Before parsing: raw bytes from a PDF
+pdf_bytes: bytes = open("manual.pdf", "rb").read()
+
+# After parsing: clean text string
+text: str = parse_pdf(pdf_bytes)
+# text = "Chapter 1: Introduction\n\nPython is a programming language..."
+```
+
+Real tools: `pypdf`, `unstructured`, `Bedrock Data Automation`, AWS Textract.
+
+Challenges:
+- PDFs have weird layouts (multi-column, headers/footers, tables)
+- Scanned PDFs need OCR
+- HTML has tags and JavaScript to strip
+- Tables get mangled into text that loses structure
+
+## 2. Chunking — `str` → `list[str]`
+
+A 50,000-word document can't fit in one LLM call, and even if it could, retrieval would pull back too much irrelevant text. So you split it into smaller pieces.
+
+```python
+# Before chunking: one giant string
+full_text: str = "Chapter 1... (50,000 words) ... The End."
+
+# After chunking: a list of smaller strings
+chunks: list[str] = [
+    "Chapter 1: Introduction. Python is a programming language...",
+    "...invented in 1991 by Guido van Rossum. It emphasizes readability...",
+    "...and supports multiple paradigms including OOP and functional...",
+    # ...hundreds more chunks
+]
+```
+
+### Common Chunking Strategies
+
+| Strategy | How it splits | When to use |
+|---|---|---|
+| Fixed-size | Every N characters or tokens | Fast, simple, dumb |
+| Sentence | On `.`, `!`, `?` | Keeps sentences whole |
+| Paragraph | On `\n\n` | Keeps logical groups |
+| Recursive | Try paragraphs → sentences → words | Default in LangChain |
+| Semantic | Where meaning shifts (via embeddings) | Highest quality, slowest |
+| Sliding window | Overlapping fixed-size | Preserves context across boundaries |
+
+### The Overlap Trick
+
+```python
+# Without overlap — answer to "when was Python invented?" might be split
+chunks = [
+    "Python is a programming language invented",
+    "in 1991 by Guido van Rossum."   # the "1991" is stranded
+]
+
+# With overlap — both chunks contain enough context
+chunks = [
+    "Python is a programming language invented in 1991",
+    "invented in 1991 by Guido van Rossum."
+]
+```
+
+A typical config: `chunk_size=500, chunk_overlap=50` (tokens or chars).
+
+## 3. Indexing — `list[str]` → `list[dict]` with embeddings
+
+Each chunk gets embedded (turned into a `list[float]`) and stored with metadata in a vector database.
+
+```python
+# The indexing process
+indexed_chunks: list[dict] = []
+for chunk in chunks:
+    embedding: list[float] = embed(chunk)   # Bedrock Titan, etc.
+    indexed_chunks.append({
+        "id": "chunk_001",
+        "text": chunk,
+        "embedding": embedding,             # list[float], 1024 dimensions
+        "source": "manual.pdf",
+        "page": 3,
+    })
+
+# What gets stored in the vector DB (OpenSearch, Pinecone, etc.)
+# [
+#   {"id": "chunk_001", "text": "...", "embedding": [0.12, -0.45, ...], ...},
+#   {"id": "chunk_002", "text": "...", "embedding": [0.08, -0.52, ...], ...},
+#   ...
+# ]
+```
+
+## Retrieval — What Happens at Query Time
+
+```python
+# User asks a question
+question: str = "When was Python invented?"
+
+# Embed the question the same way
+q_embedding: list[float] = embed(question)
+
+# Compare to every chunk's embedding via cosine similarity
+# (the vector DB does this efficiently via ANN indexes)
+top_chunks: list[dict] = vector_db.search(q_embedding, top_k=3)
+
+# Send those chunks + question to the LLM
+context: str = "\n\n".join(c["text"] for c in top_chunks)
+answer: str = llm.invoke(f"Context: {context}\n\nQuestion: {question}")
+```
+
+## The Full Pipeline in Types
+
+```
+PDF bytes        → bytes                    # raw file
+  ↓ parse
+clean text       → str                      # "Python was invented..."
+  ↓ chunk
+chunk list       → list[str]                # ["Python was...", "...1991..."]
+  ↓ embed each
+indexed docs     → list[dict]               # with list[float] embeddings
+  ↓ store
+vector database  → searchable knowledge base
+  ↓ user query
+question         → str                      # "When was Python invented?"
+  ↓ embed
+query vector     → list[float]
+  ↓ similarity search
+top-k chunks     → list[dict]
+  ↓ send to LLM
+final answer     → str
+```
+
+## Where This Lives in Our Stack
+
+Bedrock Knowledge Bases handles all of this for you:
+- **Parsing** — Bedrock Data Automation or built-in parsers on S3 files
+- **Chunking** — configurable in the KB setup (fixed, default, hierarchical, semantic)
+- **Indexing** — stored in OpenSearch Serverless, Aurora pgvector, or Pinecone
+- **Retrieval** — the `bedrock:Retrieve` API call
+
+In the code:
+- `chat/retriever.py` — wraps the Bedrock KB retrieve API
+- `chat/hybrid_chain.py` — uses the retriever for QUERY intent messages
+
+The retriever fails with 404 in our logs because we didn't configure a Knowledge Base ID. Once you do, the whole pipeline kicks in automatically.
+
+## Mental Model Summary
+
+- **Parsing** = "make the document readable" (`bytes` → `str`)
+- **Chunking** = "cut the document into bite-sized pieces" (`str` → `list[str]`)
+- **Indexing** = "give each piece a GPS coordinate in meaning space" (`list[str]` → `list[dict]` with `list[float]` embeddings)
+- **Retrieval** = "find pieces closest to the question" (cosine similarity search)
+- **Generation** = "hand the pieces + question to the LLM" (RAG's job done)
