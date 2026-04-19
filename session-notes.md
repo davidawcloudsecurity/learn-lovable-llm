@@ -7,6 +7,8 @@
 3. [Tokens, Embeddings & Vectors](#session-notes--tokens-embeddings--vectors) — Core concepts and the client-side tokenizer visualizer
 4. [Switching Backends + Real Token Counts](#session-notes--switching-backends--real-token-counts) — Moving back to LangChain backend, wiring Bedrock token usage through to UI, model compatibility, distillation
 5. [Parsing, Chunking & Indexing for RAG](#session-notes--parsing-chunking--indexing-for-rag) — How documents become searchable knowledge, with Python type analogies
+6. [Vector Stores, HNSW vs IVFFlat & AWS Cheat Sheet](#session-notes--vector-stores-hnsw-vs-ivfflat--aws-cheat-sheet) — Indexing algorithms, which AWS service for which scenario
+7. [AWS Vector Storage Services Cheat Sheet](#session-notes--aws-vector-storage-services-cheat-sheet) — OpenSearch, S3 Vectors, Postgres, DocumentDB, DynamoDB, MemoryDB, Neptune side-by-side
 
 ---
 
@@ -647,3 +649,278 @@ The retriever fails with 404 in our logs because we didn't configure a Knowledge
 - **Indexing** = "give each piece a GPS coordinate in meaning space" (`list[str]` → `list[dict]` with `list[float]` embeddings)
 - **Retrieval** = "find pieces closest to the question" (cosine similarity search)
 - **Generation** = "hand the pieces + question to the LLM" (RAG's job done)
+
+
+---
+
+# Session Notes — Vector Stores, HNSW vs IVFFlat & AWS Cheat Sheet
+
+## The Relationship
+
+A **vector store** is a database that holds embeddings and lets you search them by similarity. HNSW and IVFFlat are two different **indexing algorithms** that vector stores use to make that search fast.
+
+Without an index:
+```python
+# Naive: compare query to every chunk — O(n), slow
+for chunk in all_chunks:  # could be millions
+    score = cosine_similarity(query_vector, chunk["embedding"])
+```
+
+With an HNSW or IVFFlat index, the store can skip most chunks and find the top-k in milliseconds — that's **ANN** (Approximate Nearest Neighbor) search.
+
+```
+Vector Store (database)
+    ├── HNSW (algorithm)     — fast, high recall, more memory
+    └── IVFFlat (algorithm)  — smaller footprint, faster to build, less recall
+```
+
+## HNSW — Hierarchical Navigable Small World
+
+Think of it as a multi-layer graph. The top layer has a few "highway" nodes, lower layers have more nodes and denser connections. Search starts at the top and navigates down toward the nearest neighbors.
+
+```
+Layer 2:    A ───── B ─────── C            (few nodes, long edges)
+            │       │         │
+Layer 1:  a─A─b   c─B─d     e─C─f          (more nodes)
+            │       │         │
+Layer 0: all the vectors with dense connections
+```
+
+- **Pros**: very fast queries, high recall (95–99%)
+- **Cons**: uses more memory, slower to build, expensive to insert/update
+- **Use when**: read-heavy workloads, you need top-tier accuracy
+
+## IVFFlat — Inverted File with Flat Compression
+
+Partitions the vector space into clusters (like a k-means step). At query time, only search the few clusters closest to the query.
+
+```
+[cluster 1]  [cluster 2]  [cluster 3]
+  ● ● ●        ● ●           ● ● ●
+  ● ●          ● ●            ● ●
+                 ↑
+            query lands here → only search this cluster
+```
+
+- **Pros**: fast to build, smaller memory footprint, easier to update
+- **Cons**: lower recall than HNSW (you can miss results at cluster boundaries), slower queries for high accuracy
+- **Use when**: large datasets that change often, memory-constrained, recall tuned via `nprobes`
+
+## Which Algorithm When?
+
+| Factor | HNSW wins | IVFFlat wins |
+|---|---|---|
+| Query speed | ✓ | |
+| Recall (accuracy) | ✓ | |
+| Build time | | ✓ |
+| Memory usage | | ✓ |
+| Frequent inserts/updates | | ✓ |
+| Stable read-heavy workload | ✓ | |
+
+Default recommendation: **HNSW for production RAG**. Use IVFFlat when data changes a lot or memory matters.
+
+## AWS Vector Store Cheat Sheet
+
+### Which AWS Service Supports Vector Search?
+
+| AWS Service | Vector Engine | Algorithms | Managed? | Best For |
+|---|---|---|---|---|
+| **OpenSearch Serverless** | Vector engine built-in | HNSW, IVF | Fully managed | Default for Bedrock KB, serverless, auto-scale |
+| **OpenSearch Service (Managed Cluster)** | k-NN plugin | HNSW, IVF | Managed cluster | Predictable workloads, cost control, more tuning |
+| **Aurora PostgreSQL** (`pgvector`) | `pgvector` extension | HNSW, IVFFlat | Managed | Already using Postgres, want SQL + vectors together |
+| **RDS for PostgreSQL** (`pgvector`) | `pgvector` extension | HNSW, IVFFlat | Managed | Same as Aurora but cheaper for smaller workloads |
+| **Amazon Neptune Analytics** | Built-in | HNSW | Managed | Graph + vector hybrid queries |
+| **Amazon MemoryDB** | Built-in (Valkey-based) | HNSW | Managed | In-memory, lowest latency, smaller datasets |
+| **DocumentDB** (MongoDB-compatible) | Built-in | HNSW, IVFFlat | Managed | Already using DocumentDB |
+| **Pinecone** (AWS Marketplace) | Proprietary | Proprietary | SaaS | Need dedicated vector DB, no SQL |
+
+### Bedrock Knowledge Base — Supported Vector Stores
+
+Bedrock KB can connect to these as the backing store:
+
+- **OpenSearch Serverless** — the default, easiest setup, auto-created if you want
+- **OpenSearch Service Managed Cluster** — for more control and predictable cost
+- **Aurora PostgreSQL** (with `pgvector`)
+- **RDS for PostgreSQL** (with `pgvector`)
+- **Neptune Analytics** — when you want graph + vectors
+- **MongoDB Atlas** (third-party on Marketplace)
+- **Pinecone** (third-party on Marketplace)
+- **Redis Enterprise Cloud** (third-party on Marketplace)
+
+### Quick Decision Flow
+
+```
+Are you already using Postgres?
+ ├── Yes → Aurora/RDS Postgres with pgvector (HNSW for speed, IVFFlat for small mem)
+ └── No, new RAG project
+      ├── Want serverless, zero ops?     → OpenSearch Serverless (vector engine)
+      ├── Need fine-grained tuning?      → OpenSearch Service managed cluster
+      ├── Need lowest latency (<10ms)?   → MemoryDB
+      ├── Graph relationships matter?    → Neptune Analytics
+      ├── Using MongoDB already?         → DocumentDB
+      └── Already have Pinecone/Redis?   → Use those via KB marketplace integrations
+```
+
+## pgvector on Aurora/RDS — The Default Choice If You Know Postgres
+
+Since you're using Terraform and probably comfortable with SQL, this is often the pragmatic pick.
+
+```sql
+-- Enable pgvector extension
+CREATE EXTENSION vector;
+
+-- Table with a vector column (1024 dims for Titan)
+CREATE TABLE chunks (
+    id bigserial PRIMARY KEY,
+    text text,
+    embedding vector(1024)
+);
+
+-- Create an HNSW index (fast queries)
+CREATE INDEX ON chunks USING hnsw (embedding vector_cosine_ops);
+
+-- OR create an IVFFlat index (less memory, train on existing data)
+CREATE INDEX ON chunks USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100);
+
+-- Query: find 3 most similar chunks
+SELECT text, 1 - (embedding <=> query_embedding) AS similarity
+FROM chunks
+ORDER BY embedding <=> query_embedding
+LIMIT 3;
+```
+
+Distance operators in `pgvector`:
+- `<->` — Euclidean (L2)
+- `<#>` — negative inner product
+- `<=>` — cosine distance (most common for embeddings)
+
+## OpenSearch Serverless — The "Just Works" Option
+
+If you pick "Quick create a new vector store" in the Bedrock KB wizard, you get:
+- OpenSearch Serverless collection (type: `VECTORSEARCH`)
+- An HNSW index with sensible defaults (m=16, ef_construction=512)
+- Auto-scaling OCU (OpenSearch Compute Units)
+- Encryption + VPC options wired up
+
+Downside: OCU billing adds up if idle. Minimum is 2 OCUs (~$700/month at `us-east-1` prices as of 2026).
+
+## The Pragmatic Pick For This Project
+
+Since our Terraform stack already provisions an EC2 + DynamoDB setup, the two sensible options if you enable RAG:
+
+1. **RDS PostgreSQL + pgvector** — add to existing VPC, HNSW index, cheapest self-managed
+2. **OpenSearch Serverless** — if you want zero-ops and can accept the OCU floor cost
+
+For a lab, `RDS for PostgreSQL` with `pgvector` is the smallest bill. For a production-ish demo, `OpenSearch Serverless` takes less code.
+
+## Mental Model Summary
+
+- **Vector store** = the database (OpenSearch, Postgres, etc.)
+- **HNSW / IVFFlat** = the indexing algorithm inside it
+- HNSW = graph of shortcuts, fast + accurate, more RAM
+- IVFFlat = partitioned clusters, smaller + easier to update, less accurate
+- In AWS: `pgvector` (on Aurora/RDS) and OpenSearch both support both algorithms
+- Bedrock Knowledge Base hides all of this — you pick the backing store and it handles the rest
+
+
+---
+
+# Session Notes — AWS Vector Storage Services Cheat Sheet
+
+Quick reference for the seven AWS services commonly asked about for vector storage.
+
+## Quick Comparison Table
+
+| Service | Vector-native? | Algorithms | Bedrock KB? | Cost profile | Best for |
+|---|---|---|---|---|---|
+| **OpenSearch Serverless** | ✅ Yes | HNSW, IVF | ✅ Yes (default) | $$$ (2 OCU min) | Default, zero-ops, auto-scale |
+| **OpenSearch Managed Cluster** | ✅ Yes | HNSW, IVF | ✅ Yes | $$ (predictable) | Full control, tuning |
+| **S3 Vectors** (GA Dec 2025) | ✅ Yes | HNSW-based | ✅ Yes | $ (cheapest) | Huge archives, cold queries, 90% savings |
+| **Aurora/RDS PostgreSQL** (`pgvector`) | ✅ Extension | HNSW, IVFFlat | ✅ Yes | $$ | Already using Postgres, SQL + vectors |
+| **DocumentDB** | ✅ Yes | HNSW, IVFFlat | ❌ Via Mongo compat only | $$ | Already using MongoDB API |
+| **MemoryDB** (Valkey/Redis) | ✅ Yes | HNSW, FLAT | ❌ Not directly | $$$ (in-mem) | Sub-ms latency, semantic caching |
+| **Neptune Analytics** | ✅ Yes | HNSW | ✅ Yes | $$ | Graph + vector hybrid queries |
+| **DynamoDB** | ❌ No | N/A | ❌ No | $ | Not a vector store — use with OpenSearch zero-ETL |
+
+## One-Liner Purpose For Each
+
+### OpenSearch Serverless
+*The default vector store for Bedrock Knowledge Bases.* Pick when you want zero-ops, auto-scaling, and you're okay with the OCU floor cost (~$700/mo minimum as of 2026).
+
+### OpenSearch Managed Cluster
+Same engine, but you pick the instances and scale manually. Cheaper and more predictable than Serverless for steady workloads. Supports Bedrock KB integration.
+
+### S3 Vectors
+*Newest option (GA December 2025).* Purpose-built S3 bucket type for vector storage. Up to 90% cheaper than OpenSearch for large-scale or archival workloads. Trade-off: subsecond (not millisecond) query latency. Bedrock KB supports it.
+
+### Aurora/RDS PostgreSQL (`pgvector`)
+If you're already running Postgres, add the `pgvector` extension and you get vectors alongside your relational data. Both HNSW and IVFFlat indexes. Bedrock KB supports both.
+
+### DocumentDB (with MongoDB compatibility)
+Use when you're already on MongoDB. Supports HNSW (GA Feb 2024) and IVFFlat. Uses Mongo's `$vectorSearch` operator. Bedrock KB integrates via MongoDB Atlas compatibility, not DocumentDB directly.
+
+### MemoryDB (Redis OSS / Valkey compatible)
+In-memory. Single-digit millisecond latency. Use for *real-time* vector search or semantic caching (store LLM responses so identical/similar queries skip the LLM call). Not a primary Bedrock KB backing store.
+
+### Neptune Analytics
+Graph database + native HNSW vector index. Use when your RAG data has meaningful *relationships* (product catalogs, supply chains, org structures) and you want to combine graph traversal with vector similarity.
+
+### DynamoDB — The Odd One Out
+**DynamoDB does NOT natively store vectors.** You can cram an embedding into a `list` attribute, but there's no similarity search operator. The official AWS pattern is **zero-ETL replication to OpenSearch Service** — keep operational data in DynamoDB, vectors sync automatically to OpenSearch for search.
+
+## Decision Tree
+
+```
+Do you have vector-heavy RAG use case?
+│
+├── Cheapest, archival/large scale → S3 Vectors
+│
+├── Sub-millisecond latency (cache) → MemoryDB
+│
+├── Already using Postgres → Aurora/RDS + pgvector
+│
+├── Already using MongoDB → DocumentDB
+│
+├── Graph relationships matter → Neptune Analytics
+│
+├── Need full text + vector hybrid → OpenSearch (Serverless or Managed)
+│
+├── Want zero-ops, default setup → OpenSearch Serverless (Bedrock KB default)
+│
+└── Data lives in DynamoDB → DynamoDB + zero-ETL to OpenSearch
+```
+
+## Pricing Mental Model (roughly, us-east-1, 2026)
+
+| Service | Unit | Rough Cost |
+|---|---|---|
+| S3 Vectors | per GB stored + queries | Cheapest for large/archival |
+| RDS Postgres (pgvector) | instance hours | $$ small → big |
+| Aurora Serverless v2 (pgvector) | ACU hours | $$ auto-scaling |
+| OpenSearch Serverless | OCU hours (min 2) | $$$ floor |
+| OpenSearch Managed | instance hours | $$ predictable |
+| DocumentDB | instance hours | $$ |
+| MemoryDB | node hours (RAM-sized) | $$$ in-memory |
+| Neptune Analytics | m-NCU hours | $$ |
+| DynamoDB | reads/writes | $ but no vector search |
+
+## Which One For Our Lab?
+
+Given the existing Terraform + EC2 + DynamoDB setup:
+
+- **Cheapest working RAG**: RDS PostgreSQL (smallest instance) + `pgvector` + HNSW index
+- **Simplest Bedrock KB integration**: OpenSearch Serverless (Bedrock auto-creates it)
+- **Coolest new option**: S3 Vectors — but queries are subsecond not millisecond
+- **Already have DynamoDB — can we use it?**: Not directly. Either add zero-ETL to OpenSearch, or keep DynamoDB for sessions (our current use) and add a separate vector store for RAG.
+
+For the current chatbot project, DynamoDB stays for chat session storage (not vectors), and if you enable RAG you'd add one of: OpenSearch Serverless, RDS+pgvector, or S3 Vectors.
+
+## Mental Model Summary
+
+- **OpenSearch** = the versatile default (search + vectors, Serverless or managed)
+- **S3 Vectors** = the cheap bulk option (archival, billions of vectors)
+- **pgvector** = SQL-native (on Aurora or RDS Postgres)
+- **DocumentDB** = MongoDB-native
+- **MemoryDB** = in-memory speed (caching)
+- **Neptune Analytics** = graph-native
+- **DynamoDB** = NOT a vector store — use zero-ETL to OpenSearch if your source data lives there
